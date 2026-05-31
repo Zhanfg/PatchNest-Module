@@ -2,6 +2,15 @@
 
 ## Changelog
 
+### v0.0.6
+
+**.ko Format Full Compatibility (KernelPatch fork):**
+- Parse .modinfo section for metadata (MODULE_LICENSE, MODULE_AUTHOR, etc.)
+- Per-module allocated metadata buffer (supports multiple .ko modules)
+- Fix NULL pointer crash when .kpm.info absent
+- Null-safe get_module_info() for all string fields
+- Safe exit callback check in unload_module()
+
 ### v0.0.5
 
 **SELinux Status Hiding (KernelPatch fork):**
