@@ -2,6 +2,14 @@
 
 ## Changelog
 
+### v0.0.7
+
+**Complete Root/Module Detection Hiding (KernelPatch fork):**
+- SELinux context hiding: hook security_getprocattr for /proc/self/attr/current
+- Process hiding: proc_hide_rename_current() + SUPERCALL_PROC_RENAME (0x1170)
+- Auto-rename kpatch/kptools processes to kworker names
+- All 6 hiding mechanisms now active
+
 ### v0.0.6
 
 **.ko Format Full Compatibility (KernelPatch fork):**
