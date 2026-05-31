@@ -334,54 +334,91 @@ async function handleFileUpload(accept, containerId, onSelected) {
 
 async function uploadAndLoadModule() {
     const loadBtn = document.getElementById('load');
-    handleFileUpload('.kpm', 'kpm-list', async (file, onProgress, signal) => {
+    handleFileUpload('.kpm,.zip', 'kpm-list', async (file, onProgress, signal) => {
         loadBtn.classList.add('hide');
-        const tmpPath = `${modDir}/tmp/${file.name}`;
-        try {
-            await exec(`mkdir -p ${modDir}/tmp && rm -rf ${modDir}/tmp/*`);
-            await uploadFile(file, tmpPath, onProgress, signal);
-            const info = await getKpmInfo(tmpPath);
-            if (info && info.name) {
-                const dialog = document.getElementById('load-dialog');
-                dialog.querySelector('#load-module-msg').textContent = getString('msg_module_loaded', info.name);
-                const checkbox = dialog.querySelector('md-checkbox');
-                checkbox.checked = false;
 
-                dialog.querySelector('.cancel').onclick = () => {
-                    dialog.close();
-                    exec(`rm -rf ${modDir}/tmp`);
-                };
-
-                dialog.querySelector('.confirm').onclick = async () => {
-                    const success = await loadModule(`${modDir}/tmp/${file.name}`);
-                    if (success) {
-                        toast(getString('msg_successfully_loaded', info.name));
-                        refreshKpmList();
-                        if (!checkbox.checked) { // Save module to load on boot automatically
-                            exec(`
-                                mkdir -p ${persistDir}/kpm
-                                cp -f "${modDir}/tmp/${file.name}" "${persistDir}/kpm/${info.name}.kpm"
-                            `);
-                        }
-                    } else {
-                        toast(getString('msg_failed_load_module', info.name));
-                    }
-                    exec(`rm -rf ${modDir}/tmp`);
-                    dialog.close();
-                };
-
-                dialog.show();
-            } else {
-                toast(getString('msg_failed_get_module_info'));
-                exec(`rm -rf ${modDir}/tmp`);
-            }
-        } catch (e) {
-            exec(`rm -rf ${modDir}/tmp`);
-            throw e;
-        } finally {
-            loadBtn.classList.remove('hide');
+        // Check if this is a ZIP package
+        if (file.name.endsWith('.zip')) {
+            await installKpmZip(file, onProgress, signal);
+        } else {
+            await loadKpmFile(file, onProgress, signal);
         }
+
+        loadBtn.classList.remove('hide');
     });
+}
+
+async function installKpmZip(file, onProgress, signal) {
+    const tmpPath = `${modDir}/tmp/${file.name}`;
+    try {
+        await exec(`mkdir -p ${modDir}/tmp && rm -rf ${modDir}/tmp/*`);
+        await uploadFile(file, tmpPath, onProgress, signal);
+
+        toast(getString('msg_installing_kpm'));
+
+        // Run install_kpm.sh
+        const result = await exec(
+            `sh "${modDir}/install_kpm.sh" "${tmpPath}"`,
+            { env: { PATH: `${modDir}/bin:$PATH` } }
+        );
+
+        if (result.errno === 0) {
+            toast(result.stdout || getString('msg_kpm_installed'));
+            refreshKpmList();
+        } else {
+            toast(getString('msg_error', result.stderr || result.stdout));
+        }
+    } catch (e) {
+        toast(getString('msg_error', e.message));
+    } finally {
+        exec(`rm -rf ${modDir}/tmp`);
+    }
+}
+
+async function loadKpmFile(file, onProgress, signal) {
+    const tmpPath = `${modDir}/tmp/${file.name}`;
+    try {
+        await exec(`mkdir -p ${modDir}/tmp && rm -rf ${modDir}/tmp/*`);
+        await uploadFile(file, tmpPath, onProgress, signal);
+        const info = await getKpmInfo(tmpPath);
+        if (info && info.name) {
+            const dialog = document.getElementById('load-dialog');
+            dialog.querySelector('#load-module-msg').textContent = getString('msg_module_loaded', info.name);
+            const checkbox = dialog.querySelector('md-checkbox');
+            checkbox.checked = false;
+
+            dialog.querySelector('.cancel').onclick = () => {
+                dialog.close();
+                exec(`rm -rf ${modDir}/tmp`);
+            };
+
+            dialog.querySelector('.confirm').onclick = async () => {
+                const success = await loadModule(`${modDir}/tmp/${file.name}`);
+                if (success) {
+                    toast(getString('msg_successfully_loaded', info.name));
+                    refreshKpmList();
+                    if (!checkbox.checked) {
+                        exec(`
+                            mkdir -p ${persistDir}/kpm
+                            cp -f "${modDir}/tmp/${file.name}" "${persistDir}/kpm/${info.name}.kpm"
+                        `);
+                    }
+                } else {
+                    toast(getString('msg_failed_load_module', info.name));
+                }
+                exec(`rm -rf ${modDir}/tmp`);
+                dialog.close();
+            };
+
+            dialog.show();
+        } else {
+            toast(getString('msg_failed_get_module_info'));
+            exec(`rm -rf ${modDir}/tmp`);
+        }
+    } catch (e) {
+        exec(`rm -rf ${modDir}/tmp`);
+        throw e;
+    }
 }
 
 export function initKPMPage() {

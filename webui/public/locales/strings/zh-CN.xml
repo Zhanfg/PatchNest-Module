@@ -97,4 +97,6 @@
     <string name="msg_backup_deleted">备份已删除</string>
     <string name="msg_source_switched">已切换来源，重启生效</string>
     <string name="msg_source_reboot">* 需要重启才能生效</string>
+    <string name="msg_installing_kpm">正在安装 KPM 包...</string>
+    <string name="msg_kpm_installed">KPM 包安装成功</string>
 </resources>

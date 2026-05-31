@@ -4,11 +4,18 @@ MODDIR=${0%/*}
 KPNDIR="/data/adb/kp-next"
 PATH="$MODDIR/bin:$PATH"
 CONFIG="$KPNDIR/package_config"
-REHOOK="$(cat $KPNDIR/rehook)"
+REHOOK="$(cat $KPNDIR/rehook 2>/dev/null)"
 LOG="$KPNDIR/service.log"
+KPM_DIR="$KPNDIR/kpm"
+KPM_EVENT_DIR="$KPNDIR/kpm_events"
+
+# Helper: read a key from module.prop
+get_prop() {
+    grep "^${1}=" "$2" 2>/dev/null | head -1 | cut -d'=' -f2-
+}
 
 # Rotate log on boot
-mkdir -p "$KPNDIR"
+mkdir -p "$KPNDIR" "$KPM_DIR/failed" "$KPM_EVENT_DIR"
 echo "=== $(date) service.sh started ===" > "$LOG"
 
 # Retry kpatch hello
@@ -23,21 +30,40 @@ if [ -z "$(kpatch hello)" ]; then
     touch "$MODDIR/unresolved"
     exit 0
 fi
-
 echo "[$(date)] kpatch hello OK" >> "$LOG"
 
-# Safe KPM load — move failures to failed/ instead of deleting
-mkdir -p "$KPNDIR/kpm/failed"
-for kpm in $KPNDIR/kpm/*.kpm; do
-    [ -s "$kpm" ] || continue
-    if ! kpatch kpm load "$kpm"; then
-        echo "[$(date)] Failed to load KPM: $(basename "$kpm"), moving to failed/" >> "$LOG"
-        mv "$kpm" "$KPNDIR/kpm/failed/$(basename "$kpm")"
-    else
-        echo "[$(date)] Loaded KPM: $(basename "$kpm")" >> "$LOG"
+# ============================================================
+# Load KPM modules (.kpm, .ko, .o)
+# For each module, check module.prop for event/args/autoLoad
+# ============================================================
+load_kpm_module() {
+    local kpm_file="$1"
+    local mod_basename=$(basename "$kpm_file" | sed 's/\.\(kpm\|ko\|o\)$//')
+    local prop_file="$KPM_EVENT_DIR/${mod_basename}.args"
+    local args=""
+
+    # Read args from saved config
+    if [ -f "$KPM_EVENT_DIR/${mod_basename}.args" ]; then
+        args="$(cat "$KPM_EVENT_DIR/${mod_basename}.args")"
     fi
+
+    if ! kpatch kpm load "$kpm_file" $args; then
+        echo "[$(date)] Failed to load: $(basename "$kpm_file"), moving to failed/" >> "$LOG"
+        mv "$kpm_file" "$KPM_DIR/failed/$(basename "$kpm_file")"
+    else
+        echo "[$(date)] Loaded: $(basename "$kpm_file") args=[$args]" >> "$LOG"
+    fi
+}
+
+# Load all KPM files in kpm directory
+for kpm in "$KPM_DIR"/*.kpm "$KPM_DIR"/*.ko "$KPM_DIR"/*.o; do
+    [ -s "$kpm" ] || continue
+    load_kpm_module "$kpm"
 done
 
+# ============================================================
+# Rehook configuration
+# ============================================================
 if [ -n "$REHOOK" ]; then
     if [ "$REHOOK" = "enable" ] || [ "$REHOOK" = "disable" ]; then
         kpatch rehook $REHOOK
@@ -47,20 +73,39 @@ if [ -n "$REHOOK" ]; then
     fi
 fi
 
+# ============================================================
+# Dispatch events to loaded KPM modules
+# ============================================================
+dispatch_event() {
+    local event_name="$1"
+    echo "[$(date)] Dispatching event: $event_name" >> "$LOG"
+    kpatch event "$event_name" "" "" 2>/dev/null
+}
+
+# Dispatch POST_FS_DATA event
+dispatch_event "POST_FS_DATA"
+
+# ============================================================
+# Wait for boot completion
+# ============================================================
 until [ "$(getprop sys.boot_completed)" = "1" ]; do
     sleep 1
 done
 
-[ -f "$CONFIG" ] || exit 0
+# Dispatch BOOT_COMPLETED event
+dispatch_event "BOOT_COMPLETED"
 
-tail -n +2 "$CONFIG" | while IFS=, read -r pkg exclude allow uid; do
-    if [ "$exclude" = "1" ]; then
-        # priotize uid if exists
-        UID=$(grep "^$pkg $uid" /data/system/packages.list | cut -d' ' -f2)
-        # fallback to package name based
-        [ -z "$UID" ] && UID=$(grep "^$pkg " /data/system/packages.list | cut -d' ' -f2)
-        [ -n "$UID" ] && kpatch exclude_set "$UID" 1
-    fi
-done
+# ============================================================
+# Apply package exclusion config
+# ============================================================
+if [ -f "$CONFIG" ]; then
+    tail -n +2 "$CONFIG" | while IFS=, read -r pkg exclude allow uid; do
+        if [ "$exclude" = "1" ]; then
+            UID=$(grep "^$pkg $uid" /data/system/packages.list | cut -d' ' -f2)
+            [ -z "$UID" ] && UID=$(grep "^$pkg " /data/system/packages.list | cut -d' ' -f2)
+            [ -n "$UID" ] && kpatch exclude_set "$UID" 1
+        fi
+    done
+fi
 
 echo "[$(date)] service.sh completed" >> "$LOG"

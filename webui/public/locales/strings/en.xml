@@ -97,4 +97,6 @@
     <string name="msg_backup_deleted">Backup deleted</string>
     <string name="msg_source_switched">Source switched, reboot to apply</string>
     <string name="msg_source_reboot">* Reboot required to apply</string>
+    <string name="msg_installing_kpm">Installing KPM package...</string>
+    <string name="msg_kpm_installed">KPM package installed successfully</string>
 </resources>
