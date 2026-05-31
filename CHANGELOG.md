@@ -2,6 +2,14 @@
 
 ## Changelog
 
+### v0.0.5
+
+**SELinux Status Hiding (KernelPatch fork):**
+- Hook sel_read_enforce to hide policy modifications from apps
+- Original enforcing state saved at boot, shown to non-privileged processes
+- Root/system processes see real state
+- Prevents detection of AVC denial bypasses and context changes
+
 ### v0.0.4
 
 **Root/Module Detection Hiding (KernelPatch fork):**
