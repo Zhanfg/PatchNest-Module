@@ -2,6 +2,14 @@
 
 ## Changelog
 
+### v0.1.1
+
+**Embedded KPM Crash Protection (KernelPatch fork):**
+- boot_patch.sh: pre-embed validation (ELF magic, aarch64 arch, kptools verify)
+  Refuses to patch if any embedded KPM fails validation
+- Early boot counter: /dev/.kp_bootcount (tmpfs, works before /data mount)
+  Embedded KPM crash → reboot → count++ → 3 reboots → safe mode
+
 ### v0.1.0
 
 **KPM Crash Protection System (KernelPatch fork):**

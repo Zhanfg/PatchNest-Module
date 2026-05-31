@@ -72,6 +72,55 @@ fi
 
 mv kernel kernel.ori
 
+# ============================================================
+# Validate embedded KPMs before patching
+# Parse -M <kpm_file> from args and validate each one
+# ============================================================
+echo "- Validating embedded modules..."
+validate_failed=0
+for arg in "$@"; do
+    case "$prev_flag" in
+        -M)
+            kpm_file="$arg"
+            if [ ! -f "$kpm_file" ]; then
+                echo "! Embedded KPM not found: $kpm_file"
+                validate_failed=1
+                continue
+            fi
+            # Check ELF magic (7f 45 4c 46)
+            magic=$(xxd -l 4 -p "$kpm_file" 2>/dev/null)
+            if [ "$magic" != "7f454c46" ]; then
+                echo "! Invalid ELF: $kpm_file (magic=$magic)"
+                validate_failed=1
+                continue
+            fi
+            # Check aarch64 (e_machine = 0xB7 at offset 18)
+            machine=$(xxd -s 18 -l 2 -e "$kpm_file" 2>/dev/null | awk '{print $2}')
+            if [ "$machine" != "000000b7" ] && [ "$machine" != "b700" ]; then
+                echo "! Not aarch64: $kpm_file"
+                validate_failed=1
+                continue
+            fi
+            # Try kptools validation if available
+            if kptools -l -M "$kpm_file" >/dev/null 2>&1; then
+                kpm_name=$(kptools -l -M "$kpm_file" 2>/dev/null | grep "^name=" | cut -d= -f2)
+                echo "  ✓ Valid: ${kpm_name:-$kpm_file}"
+            else
+                # kptools -l might not work for all formats, just warn
+                echo "  ⚠ Cannot verify with kptools: $kpm_file (proceeding)"
+            fi
+            ;;
+    esac
+    prev_flag="$arg"
+done
+
+if [ $validate_failed -ne 0 ]; then
+    echo "! Embedded KPM validation failed. Aborting patch."
+    echo "! Remove invalid KPM files and try again."
+    mv kernel.ori kernel
+    exit 1
+fi
+
 echo "- Patching kernel"
 
 set -x
