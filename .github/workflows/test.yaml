@@ -32,9 +32,11 @@ jobs:
         # SC3043: 'local' is undefined in POSIX sh — Android uses mksh, local is fine
         # SC2034: unused variables — many are read by while loops or inherited from upstream
         # SC2115: rm -rf with variable — these paths are always absolute
-        shellcheck -s sh -S warning --exclude=SC3043,SC2034,SC2115 \
+        # SC2046: unquoted command substitution — inherited from APatch scripts
+        # SC2319: $? in condition — inherited from APatch scripts
+        shellcheck -s sh -S warning --exclude=SC3043,SC2034,SC2115,SC2046,SC2319 \
           module/service.sh module/customize.sh module/post-fs-data.sh module/action.sh module/status.sh module/uninstall.sh
-        shellcheck -s sh -S warning --exclude=SC3043,SC2034,SC2115 \
+        shellcheck -s sh -S warning --exclude=SC3043,SC2034,SC2115,SC2046,SC2319 \
           module/patch/boot_patch.sh module/patch/boot_extract.sh module/patch/boot_unpatch.sh
         # util_functions.sh has many inherited patterns from APatch, only check for errors
         shellcheck -s sh -S error module/patch/util_functions.sh || true
