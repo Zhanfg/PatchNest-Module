@@ -78,18 +78,50 @@ async function detectUserLanguage() {
         const prefered_language_code = localStorage.getItem('kp-next_language');
 
         // Check if preferred language is valid
-        if (prefered_language_code !== 'default' && availableLanguages.includes(prefered_language_code)) {
+        if (prefered_language_code && prefered_language_code !== 'default' && availableLanguages.includes(prefered_language_code)) {
             return prefered_language_code;
-        } else if (availableLanguages.includes(userLang)) {
-            return userLang;
-        } else if (availableLanguages.includes(langCode)) {
-            return langCode;
-        } else {
-            localStorage.removeItem('kp-next_language');
-            return 'en';
         }
+
+        // Auto-detect from system language
+        // 1. Exact match (e.g., "zh-TW", "pt-BR")
+        if (availableLanguages.includes(userLang)) {
+            return userLang;
+        }
+
+        // 2. Case-insensitive match (e.g., "zh-tw" → "zh-TW")
+        const lowerLang = userLang.toLowerCase();
+        for (const avail of availableLanguages) {
+            if (avail.toLowerCase() === lowerLang) {
+                return avail;
+            }
+        }
+
+        // 3. Script-based match for Chinese variants
+        // zh-Hant → zh-TW or zh-HK; zh-Hans → zh-CN
+        if (langCode === 'zh') {
+            if (userLang.includes('Hant') || userLang.includes('TW') || userLang.includes('HK')) {
+                return availableLanguages.includes('zh-TW') ? 'zh-TW' : 'zh-HK';
+            }
+            return 'zh-CN';
+        }
+
+        // 4. Language code prefix match (e.g., "ja-JP" → "ja")
+        if (availableLanguages.includes(langCode)) {
+            return langCode;
+        }
+
+        // 5. Find first locale starting with langCode (e.g., "pt" → "pt-BR")
+        for (const avail of availableLanguages) {
+            if (avail.startsWith(langCode + '-')) {
+                return avail;
+            }
+        }
+
+        // 6. Fallback to English
+        localStorage.removeItem('kp-next_language');
+        return 'en';
     } catch (error) {
-        console.error('Error detecting user language:', error);
+        console.error('Error detecting language:', error);
         return 'en';
     }
 }
