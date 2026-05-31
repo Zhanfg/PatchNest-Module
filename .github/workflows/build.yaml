@@ -58,6 +58,10 @@ jobs:
     - name: Build WebUI
       run: cd webui && pnpm install --frozen-lockfile && pnpm build
 
+    # === Validate module package completeness ===
+    - name: Validate module package
+      run: node tests/validate_module.js
+
     - uses: actions/upload-artifact@v6
       with:
         name: ${{ env.MODULE_NAME }}-${{ github.run_number }}
