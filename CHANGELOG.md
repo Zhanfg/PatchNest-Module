@@ -2,6 +2,20 @@
 
 ## Changelog
 
+### v0.2.1
+
+**Fix missing kpatch binary:**
+- kpimg/kptools from KernelPatch-Public (custom fork with KSU features)
+- kpatch user-space tool from KPatch-Next (only source for this binary)
+- All module functionality now operational
+
+### v0.2.0
+
+**Unified source, remove binary switching:**
+- Remove binary source selector from WebUI
+- Use KernelPatch-Public as primary source
+- Simplify build.sh and CI
+
 ### v0.1.4
 
 **CI Fix — dual binary source:**

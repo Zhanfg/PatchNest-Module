@@ -23,7 +23,7 @@ jobs:
     - name: Load versions
       run: grep -v '^#' version.properties | sed -e 's/ *= */=/g' -e 's/"//g' >> $GITHUB_ENV
 
-    # === KernelPatch binaries ===
+    # === KernelPatch binaries (kpimg, kptools) ===
     - name: Download KernelPatch binaries
       run: |
         mkdir -p module/bin
@@ -32,6 +32,14 @@ jobs:
         if [ "$TAG" != "latest" ]; then gh release download "$TAG" "${ARGS[@]}"; else gh release download "${ARGS[@]}"; fi
         mv module/bin/kpimg-linux module/bin/kpimg
         mv module/bin/kptools-android module/bin/kptools
+
+    # === kpatch user-space tool (only from KPatch-Next) ===
+    - name: Download kpatch tool
+      run: |
+        TAG="${{ env['kpatch-next'] }}"
+        ARGS=("-R" "KernelSU-Next/KPatch-Next" "-p" "kpatch-android" "-D" "module/bin")
+        if [ "$TAG" != "latest" ]; then gh release download "$TAG" "${ARGS[@]}"; else gh release download "${ARGS[@]}"; fi
+        mv module/bin/kpatch-android module/bin/kpatch
 
     # === Magiskboot ===
     - name: Download magiskboot

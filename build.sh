@@ -49,15 +49,23 @@ download_assets() {
 
 VERSION_KERNELPATCH=$(get_ver "kernelpatch")
 VERSION_KERNELPATCH="${VERSION_KERNELPATCH:-latest}"
+VERSION_KPATCH_NEXT=$(get_ver "kpatch-next")
+VERSION_KPATCH_NEXT="${VERSION_KPATCH_NEXT:-latest}"
 VERSION_MAGISKBOOT=$(get_ver "magiskboot")
 VERSION_MAGISKBOOT="${VERSION_MAGISKBOOT:-latest}"
 
-# Fetch KernelPatch binaries from public fork
-if [[ ! -f "module/bin/kpatch" || ! -f "module/bin/kpimg" || ! -f "module/bin/kptools" ]]; then
+# Fetch KernelPatch binaries (kpimg, kptools) from public fork
+if [[ ! -f "module/bin/kpimg" || ! -f "module/bin/kptools" ]]; then
     download_assets "Zhanfg/KernelPatch-Public" "$VERSION_KERNELPATCH" "module/bin" "kpimg-linux" "kptools-android"
-
     mv module/bin/kpimg-linux module/bin/kpimg
     mv module/bin/kptools-android module/bin/kptools
+fi
+
+# Fetch kpatch user-space tool from KPatch-Next
+# (kpuser binary only available from KPatch-Next, not KernelPatch)
+if [[ ! -f "module/bin/kpatch" ]]; then
+    download_assets "KernelSU-Next/KPatch-Next" "$VERSION_KPATCH_NEXT" "module/bin" "kpatch-android"
+    mv module/bin/kpatch-android module/bin/kpatch
 fi
 
 # Fetch magiskboot
