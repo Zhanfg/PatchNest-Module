@@ -9,7 +9,7 @@ mkdir -p out module/bin module/webroot
 
 # Build WebUI
 cd webui
-pnpm build || pnpm install && pnpm build
+pnpm build || { pnpm install && pnpm build; }
 cd ..
 
 # Read versions from version.properties

@@ -92,7 +92,7 @@ mkdir -p "$KPM_DIR" "$KPM_ZIP_DIR" "$KPM_EVENT_DIR"
 
 # Check for source files (.c)
 SRC_FILES=$(find "$TMPDIR" -name "*.c" -type f 2>/dev/null)
-KPM_FILES=$(find "$TMPDIR" -name "*.kpm" -o -name "*.ko" -o -name "*.o" 2>/dev/null | grep -v '__MACOSX')
+KPM_FILES=$(find "$TMPDIR" -type f \( -name "*.kpm" -o -name "*.ko" -o -name "*.o" \) 2>/dev/null | grep -v '__MACOSX')
 
 if [ -n "$KPM_FILES" ]; then
     # Binary module: copy .kpm/.ko/.o directly
@@ -153,7 +153,7 @@ if [ "$MOD_AUTOLOAD" = "true" ]; then
     if [ -n "$MOD_ARGS" ]; then
         ARGS_OPT="$MOD_ARGS"
     fi
-    kpatch kpm load "$KPM_DIR/${MOD_ID}.kpm" $ARGS_OPT
+    kpatch kpm load "$KPM_DIR/${MOD_ID}.kpm" "$ARGS_OPT" 2>&1
     if [ $? -eq 0 ]; then
         log "Module $MOD_ID loaded successfully"
         echo "- Successfully installed and loaded: $MOD_NAME v$MOD_VERSION"

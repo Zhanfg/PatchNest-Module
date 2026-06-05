@@ -111,21 +111,25 @@ CFLAGS="-nostdinc -nostdlib -fno-builtin -fno-stack-protector -I$KPM_INCLUDE -I$
 
 if [ "$COMPILER" = "tcc" ]; then
     # TCC: simple compile to .o
+    # shellcheck disable=SC2086  # SRC_FILES is intentionally word-split (one flag per file)
     $COMPILER -c $CFLAGS -o "$OBJ_FILE" $SRC_FILES
+    compile_rc=$?
 else
     # clang/gcc: need aarch64 target
     ARCH=$(getprop ro.product.cpu.abi 2>/dev/null)
     if [ "$ARCH" = "arm64-v8a" ]; then
         # Native compilation on arm64 device
+        # shellcheck disable=SC2086
         $COMPILER -c $CFLAGS -o "$OBJ_FILE" $SRC_FILES
+        compile_rc=$?
     else
         echo "! Cross-compilation not supported on $ARCH architecture"
         exit 1
     fi
 fi
 
-if [ $? -ne 0 ] || [ ! -f "$OBJ_FILE" ]; then
-    log "Compilation failed"
+if [ "$compile_rc" -ne 0 ] || [ ! -f "$OBJ_FILE" ]; then
+    log "Compilation failed (rc=$compile_rc)"
     echo "! Compilation failed"
     exit 1
 fi

@@ -13,7 +13,7 @@ async function refreshLog() {
     emptyMsg.textContent = getString('status_loading');
     emptyMsg.classList.remove('hidden');
 
-    const result = await exec(`tail -200 "${LOG_PATH}"`, { env: { PATH: `${modDir}/bin` } });
+    const result = await exec(`tail -n 200 "${LOG_PATH}"`, { env: { PATH: `${modDir}/bin` } });
     if (result.errno === 0 && result.stdout.trim()) {
         container.textContent = result.stdout;
         emptyMsg.classList.add('hidden');

@@ -6,11 +6,15 @@ import { getString } from './language.js';
 export const modDir = '/data/adb/modules/KPatch-Next';
 export const persistDir = '/data/adb/kp-next';
 
-export let MAX_CHUNK_SIZE = 96 * 1024;
+const DEFAULT_CHUNK_SIZE = 96 * 1024;
+export let MAX_CHUNK_SIZE = DEFAULT_CHUNK_SIZE;
+let maxChunkInitialized = false;
 
 export function escapeShell(cmd) {
     if (cmd === '' || cmd === null || cmd === undefined) return '""';
-    return '"' + cmd.replace(/[\\"$`'[\]]/g, '\\$&') + '"';
+    // Characters that are dangerous inside double quotes:
+    //   $ ` " ! \  — all need backslash-escaping
+    return '"' + cmd.replace(/[\\"$`!\\]/g, '\\$&') + '"';
 }
 
 export function linkRedirect(link) {
@@ -26,13 +30,21 @@ export function linkRedirect(link) {
     }, 100);
 }
 
-export function getMaxChunkSize() {
-    exec('getconf ARG_MAX').then((result) => {
-        try {
-            const max_arg = parseInt(result.stdout.trim());
-            if (!isNaN(max_arg)) {
-                MAX_CHUNK_SIZE = Math.floor(max_arg * 0.75) - 1024;
-            }
-        } catch (e) { }
-    });
+/**
+ * Initialize MAX_CHUNK_SIZE from `getconf ARG_MAX`.
+ * Returns a promise so callers can await it before first upload.
+ * Safe to call multiple times — only runs once.
+ */
+export async function getMaxChunkSize() {
+    if (maxChunkInitialized) return;
+    maxChunkInitialized = true;
+    try {
+        const result = await exec('getconf ARG_MAX');
+        const maxArg = parseInt(result.stdout.trim());
+        if (!isNaN(maxArg)) {
+            MAX_CHUNK_SIZE = Math.floor(maxArg * 0.75) - 1024;
+        }
+    } catch (e) {
+        // Silently fall back to DEFAULT_CHUNK_SIZE
+    }
 }

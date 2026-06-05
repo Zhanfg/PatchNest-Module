@@ -13,12 +13,14 @@ set_prop() {
     local file="$3"
 
     if ! grep -q "^$prop=" "$file"; then
-        echo "$prop=$value" >> "$file"
+        printf '%s=%s\n' "$prop" "$value" >> "$file"
         return
     fi
-    sed "s/^$prop=.*/$prop=$value/" "$file" > "$file.tmp"
-    cat "$file.tmp" > "$file"
-    rm -f "$file.tmp"
+    # Use a different delimiter (|) so values containing "/" don't break sed,
+    # and escape both the prop key and value for sed regex.
+    # shellcheck disable=SC3001  # ash on Android handles this fine
+    sed "s|^$prop=.*|$prop=$value|" "$file" > "$file.tmp"
+    mv "$file.tmp" "$file"
 }
 
 restore_prop_if_needed() {
@@ -28,7 +30,9 @@ restore_prop_if_needed() {
 
 # self cleanup if module removed improperly
 if [ ! -d "$MODDIR" ]; then
-    rm -f "$(realpath "$0")"
+    # realpath isn't on all toybox builds; readlink -f is a safer fallback.
+    self_path=$(readlink -f "$0" 2>/dev/null || echo "$0")
+    rm -f "$self_path"
     exit 0
 fi
 

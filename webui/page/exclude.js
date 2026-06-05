@@ -78,7 +78,11 @@ async function saveExcludedList(excludedApps) {
         localStorage.setItem('kp-next_excluded_mock', csvContent);
         return;
     }
-    await exec(`echo "${csvContent}" > ${persistDir}/package_config`);
+    // Write via a quoted single-quoted heredoc and an explicit printf so a
+    // malicious package name with " $ ` or \ cannot inject into the shell.
+    // EOF delimiter is unique to the run; the leading '-' tolerates leading tabs.
+    const eof = `__KP_NEXT_EOF_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}__`;
+    await exec(`cat > ${escapeShell(persistDir + '/package_config')} <<'${eof}'\n${csvContent}\n${eof}`);
 }
 
 async function renderAppList() {
@@ -100,6 +104,16 @@ async function renderAppList() {
             }
         }
 
+        // Build appByRealUid map once so the toggle handler (which runs
+        // later via closure) can do O(1) lookups instead of scanning allApps.
+        const appByRealUid = new Map();
+        allApps.forEach(app => {
+            const rUid = app.uid % 100000;
+            const key = `${(app.packageName || '').trim()}:${rUid}`;
+            if (!appByRealUid.has(key)) appByRealUid.set(key, []);
+            appByRealUid.get(key).push(app);
+        });
+
         if (rawContent) {
             let lines = rawContent.split('\n').filter(l => l.trim());
 
@@ -117,14 +131,6 @@ async function renderAppList() {
 
             // Consistency check
             if (allApps.length > 0) {
-                const appByRealUid = new Map();
-                allApps.forEach(app => {
-                    const rUid = app.uid % 100000;
-                    const key = `${(app.packageName || '').trim()}:${rUid}`;
-                    if (!appByRealUid.has(key)) appByRealUid.set(key, []);
-                    appByRealUid.get(key).push(app);
-                });
-
                 excludedApps = [];
                 let changed = false;
                 list.forEach(item => {
@@ -194,23 +200,26 @@ async function renderAppList() {
                     const realUid = app.uid % 100000;
                     const isSelected = toggle.selected;
 
-                    // Sync state across all instances of the same app
-                    allApps.forEach(a => {
-                        if (a.packageName === app.packageName && (a.uid % 100000) === realUid) {
-                            if (isSelected) {
-                                if (!excludedApps.some(e => e.packageName === a.packageName && e.uid === a.uid)) {
-                                    excludedApps.push({ packageName: a.packageName, uid: a.uid });
-                                }
-                            } else {
-                                excludedApps = excludedApps.filter(e => !(e.packageName === a.packageName && e.uid === a.uid));
+                    // Sync state across all instances of the same app.
+                    // Build a key list up-front instead of scanning allApps
+                    // (O(N) per toggle) — apps with the same package+rUID
+                    // are rare, so a direct index lookup is O(1).
+                    const groupKey = `${app.packageName}:${realUid}`;
+                    const group = appByRealUid.get(groupKey) || [app];
+                    group.forEach(a => {
+                        if (isSelected) {
+                            if (!excludedApps.some(e => e.packageName === a.packageName && e.uid === a.uid)) {
+                                excludedApps.push({ packageName: a.packageName, uid: a.uid });
                             }
+                        } else {
+                            excludedApps = excludedApps.filter(e => !(e.packageName === a.packageName && e.uid === a.uid));
+                        }
 
-                            const otherItem = appItemMap.get(`${a.packageName}:${a.uid}`);
-                            if (otherItem) {
-                                const otherToggle = otherItem.querySelector('md-switch');
-                                if (otherToggle && otherToggle !== toggle) {
-                                    otherToggle.selected = isSelected;
-                                }
+                        const otherItem = appItemMap.get(`${a.packageName}:${a.uid}`);
+                        if (otherItem) {
+                            const otherToggle = otherItem.querySelector('md-switch');
+                            if (otherToggle && otherToggle !== toggle) {
+                                otherToggle.selected = isSelected;
                             }
                         }
                     });

@@ -9,6 +9,7 @@ let allKpms = [];
 let searchQuery = '';
 let clickCount = 0;
 let lastClickTime = 0;
+let redirectShown = false;
 
 async function getKpmInfo(path) {
     const result = await exec(`kptools -l -M "${path}"`, { env: { PATH: `${modDir}/bin` } });
@@ -127,12 +128,13 @@ async function renderKpmList() {
                 </div>
             `;
 
+            const moduleName = module.name;
             item.querySelector('.control').onclick = () => {
                 const dialog = document.getElementById('control-dialog');
                 const textField = dialog.querySelector('md-outlined-text-field');
                 dialog.querySelector('.cancel').onclick = () => dialog.close();
                 dialog.querySelector('.confirm').onclick = async () => {
-                    await controlModule(module.name, textField.value);
+                    await controlModule(moduleName, textField.value);
                     refreshKpmList();
                     initInfo();
                     textField.value = '';
@@ -142,10 +144,10 @@ async function renderKpmList() {
             }
             item.querySelector('.unload').onclick = async () => {
                 const dialog = document.getElementById('unload-dialog');
-                dialog.querySelector('[slot=content]').innerHTML = `<div>${getString('msg_unload_module', module.name)}</div>`;
+                dialog.querySelector('[slot=content]').innerHTML = `<div>${getString('msg_unload_module', moduleName)}</div>`;
                 dialog.querySelector('.cancel').onclick = () => dialog.close();
                 dialog.querySelector('.confirm').onclick = async () => {
-                    await unloadModule(module.name);
+                    await unloadModule(moduleName);
                     refreshKpmList();
                     initInfo();
                     dialog.close();
@@ -153,10 +155,20 @@ async function renderKpmList() {
                 dialog.show();
             }
 
-            kpmItemMap.set(module.name, item);
+            kpmItemMap.set(moduleName, item);
         }
         container.appendChild(item);
     });
+
+    // Prune any cached items that no longer exist (renamed or removed modules).
+    // Otherwise a stale DOM element would persist with a listener bound to the
+    // old name.
+    const liveNames = new Set(allKpms.map(m => m.name));
+    for (const cachedName of Array.from(kpmItemMap.keys())) {
+        if (!liveNames.has(cachedName)) {
+            kpmItemMap.delete(cachedName);
+        }
+    }
 
     applyFilters();
 }
@@ -189,6 +201,42 @@ async function uploadFile(file, targetPath, onProgress, signal) {
     const CHUNK_SIZE = file.size > MAX_CHUNK_SIZE * 4 ? MAX_CHUNK_SIZE : Math.max(1, Math.ceil(file.size / 4));
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
     const CONCURRENCY = 8;
+    // Per-chunk write should not exceed this — 16 MB at 96KB chunks is ~3 minutes
+    // of pipe time, well above any realistic transport delay.
+    const CHUNK_TIMEOUT_MS = 60_000;
+    // Final cat-merge should not exceed this.
+    const COMBINE_TIMEOUT_MS = 120_000;
+
+    // Wrap a child process in a promise that resolves on exit OR rejects on
+    // timeout / abort. The child is killed in either failure case so we don't
+    // leak orphan base64 pipes.
+    const spawnWithTimeout = (cmd, timeoutMs) => new Promise((resolve, reject) => {
+        const child = spawn(cmd);
+        let settled = false;
+        const onAbort = () => {
+            if (settled) return;
+            settled = true;
+            try { child.kill('SIGKILL'); } catch (_) {}
+            reject(new DOMException(signal?.aborted ? 'Aborted' : 'Timed out', signal?.aborted ? 'AbortError' : 'TimeoutError'));
+        };
+        const timer = setTimeout(onAbort, timeoutMs);
+        child.on('exit', (code) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve({ errno: code });
+        });
+        child.on('error', (err) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            reject(err);
+        });
+        if (signal) {
+            if (signal.aborted) { onAbort(); return; }
+            signal.addEventListener('abort', onAbort, { once: true });
+        }
+    });
 
     await exec(`mkdir -p "$(dirname "${targetPath}")"`);
 
@@ -210,10 +258,10 @@ async function uploadFile(file, targetPath, onProgress, signal) {
         });
 
         const partPath = `${targetPath}.part${index.toString().padStart(8, '0')}`;
-        const result = await new Promise((resolve) => {
-            const child = spawn(`echo '${base64}' | base64 -d > "${partPath}"`);
-            child.on('exit', (code) => resolve({ errno: code }));
-        });
+        const result = await spawnWithTimeout(
+            `echo '${base64}' | base64 -d > "${partPath}"`,
+            CHUNK_TIMEOUT_MS
+        );
 
         if (result.errno !== 0) {
             throw new Error(`Write error at chunk ${index}`);
@@ -245,10 +293,10 @@ async function uploadFile(file, targetPath, onProgress, signal) {
             return;
         }
 
-        const combineResult = await new Promise((resolve) => {
-            const child = spawn(`cat "${targetPath}.part"* > "${targetPath}" && rm -f "${targetPath}.part"*`);
-            child.on('exit', (code) => resolve({ errno: code }));
-        });
+        const combineResult = await spawnWithTimeout(
+            `cat "${targetPath}.part"* > "${targetPath}" && rm -f "${targetPath}.part"*`,
+            COMBINE_TIMEOUT_MS
+        );
         if (combineResult.errno !== 0) {
             throw new Error('Merge error');
         }
@@ -259,13 +307,17 @@ async function uploadFile(file, targetPath, onProgress, signal) {
 }
 
 function checkFileUploadApi() {
-    // If we reach here 3 times in 2 seconds, upload api is likely available
+    // If the user reaches here 3 times in 2 seconds, the upload API is
+    // likely missing on this WebUI host. We only want to suggest the
+    // standalone once per session to avoid an annoying redirect on rapid clicks.
+    if (redirectShown) return;
     const currentTime = Date.now();
     clickCount = (currentTime - lastClickTime > 2000) ? 1 : clickCount + 1;
     lastClickTime = currentTime;
 
     if (clickCount === 3) {
         clickCount = 0;
+        redirectShown = true;
         linkRedirect('https://github.com/KOWX712/KsuWebUIStandalone/releases/latest');
     }
 }
@@ -397,20 +449,31 @@ async function loadKpmFile(file, onProgress, signal) {
             };
 
             dialog.querySelector('.confirm').onclick = async () => {
-                const success = await loadModule(`${modDir}/tmp/${file.name}`);
+                // Sanitize once: the user's original filename is the trust boundary here.
+                // Both sides of the upload flow must use the SAME safe name to avoid
+                // a TOCTOU between upload() and loadModule().
+                const safeFileName = sanitizeFilename(file.name) + '.kpm';
+                const success = await loadModule(`${modDir}/tmp/${safeFileName}`);
                 if (success) {
                     toast(getString('msg_successfully_loaded', info.name));
                     refreshKpmList();
                     if (!checkbox.checked) {
-                        exec(`
-                            mkdir -p ${persistDir}/kpm
-                            cp -f "${modDir}/tmp/${file.name}" "${persistDir}/kpm/${info.name}.kpm"
-                        `);
+                        const safeName = sanitizeFilename(info.name);
+                        exec(
+                            `mkdir -p ${escapeShell(persistDir + '/kpm')}\n` +
+                            `cp -f ${escapeShell(modDir + '/tmp/' + safeFileName)} ` +
+                            `${escapeShell(persistDir + '/kpm/' + safeName + '.kpm')}`
+                        );
                     }
+                    // Success — safe to drop the tmp dir.
+                    exec(`rm -rf ${escapeShell(modDir + '/tmp')}`);
                 } else {
+                    // Keep the uploaded file in tmp/ on failure so the user can
+                    // inspect it (e.g. kptools -l -M) and so a retry can use
+                    // it without re-uploading. The next upload/load cycle's
+                    // `rm -rf ${modDir}/tmp/*` at the start will clear it.
                     toast(getString('msg_failed_load_module', info.name));
                 }
-                exec(`rm -rf ${modDir}/tmp`);
                 dialog.close();
             };
 

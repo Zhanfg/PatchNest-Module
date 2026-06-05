@@ -68,13 +68,23 @@ async function refreshBackupList() {
         `;
 
         card.querySelector('.save-btn').onclick = async () => {
-            const safeName = escapeShell(backup.name);
-            const result = await exec(`cp ${escapeShell(BACKUP_DIR + '/' + backup.name)} /storage/emulated/0/Download/${safeName}`);
+            // Strip any directory components — backup.name must be a basename only,
+            // otherwise a malicious or malformed ls entry could write outside Download/.
+            const baseName = String(backup.name).split('/').pop().split('\\').pop();
+            if (!baseName || baseName.includes('..')) {
+                toast(getString('msg_error', 'Invalid backup name'));
+                return;
+            }
+            const result = await exec(
+                `cp ${escapeShell(BACKUP_DIR + '/' + baseName)} ` +
+                `${escapeShell('/storage/emulated/0/Download/' + baseName)}`
+            );
             toast(result.errno === 0 ? getString('msg_backup_saved') : getString('msg_error', result.stderr));
         };
 
         card.querySelector('.delete-btn').onclick = async () => {
-            await exec(`rm -f ${escapeShell(BACKUP_DIR + '/' + backup.name)}`);
+            const baseName = String(backup.name).split('/').pop().split('\\').pop();
+            await exec(`rm -f ${escapeShell(BACKUP_DIR + '/' + baseName)}`);
             toast(getString('msg_backup_deleted'));
             refreshBackupList();
         };

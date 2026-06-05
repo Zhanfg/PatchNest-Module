@@ -48,10 +48,13 @@ export async function initInfo() {
         result.stdout = '6.18.2-linux\n16\nLinuxPC\nEnforcing';
     }
     const info = result.stdout.trim().split('\n');
-    document.getElementById('kernel-release').textContent = info[0];
-    document.getElementById('system').textContent = info[1];
-    document.getElementById('fingerprint').textContent = info[2];
-    document.getElementById('selinux').textContent = info[3];
+    // If the kernel call failed (no newline-separated output) fall back to a
+    // placeholder so the UI doesn't render literal "undefined".
+    const fallback = '—';
+    document.getElementById('kernel-release').textContent = info[0] || fallback;
+    document.getElementById('system').textContent = info[1] || fallback;
+    document.getElementById('fingerprint').textContent = info[2] || fallback;
+    document.getElementById('selinux').textContent = info[3] || fallback;
 }
 
 async function reboot(reason = "") {
@@ -78,25 +81,30 @@ async function initRehook() {
 
 async function updateRehookStatus() {
     const rehook = document.getElementById('rehook');
+    if (!rehook) return null;
     const rehookSwitch = rehook.querySelector('md-switch');
     let isEnabled = null;
     const result = await exec(`kpatch rehook_status`, { env: { PATH: `${modDir}/bin` } });
     if (result.errno === 0) {
         const mode = result.stdout.split(':')[1].trim();
         isEnabled = mode === 'enabled' ? true : (mode === 'disabled' ? false : null);
-        if (isEnabled !== null) rehookSwitch.selected = isEnabled;
+        if (isEnabled !== null && rehookSwitch) rehookSwitch.selected = isEnabled;
     }
     return isEnabled;
 }
 
 function setRehookMode(isEnable) {
+    const rehook = document.getElementById('rehook');
+    const rehookSwitch = rehook?.querySelector('md-switch');
     const mode = isEnable ? "enable" : "disable";
-    exec(`
-        kpatch rehook ${mode} && echo ${mode} > ${persistDir}/rehook && sh "${modDir}/status.sh"`,
+    exec(
+        `kpatch rehook ${mode} && echo ${mode} > ${escapeShell(persistDir + '/rehook')} && sh ${escapeShell(modDir + '/status.sh')}`,
         { env: { PATH: `${modDir}/bin:$PATH` } }
     ).then((result) => {
         if (result.errno !== 0) {
             toast(getString('msg_error', result.stderr));
+            // Roll the UI switch back to the previous state on failure.
+            updateRehookStatus();
             return;
         }
         updateRehookStatus();
@@ -156,7 +164,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     document.getElementById('reboot-fab').onclick = () => reboot();
 
-    getMaxChunkSize();
+    await getMaxChunkSize();
 
     await loadTranslations();
     await Promise.all([updateStatus(), initInfo()]);

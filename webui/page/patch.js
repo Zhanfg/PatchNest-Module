@@ -82,8 +82,15 @@ function extractBootimg(bootDev) {
         cwd: `${modDir}/tmp`,
         env: { PATH: `${modDir}/bin:/data/adb/ksu/bin:/data/adb/magisk:$PATH` }
     });
-    child.on('exit', () => {
+    child.on('exit', (code) => {
+        if (code !== 0) {
+            toast(getString('msg_failed_unpack_boot'));
+            return;
+        }
         parseBootimg();
+    });
+    child.on('error', (err) => {
+        toast(getString('msg_error', err.message));
     });
 }
 
@@ -91,6 +98,9 @@ async function parseBootimg() {
     if (import.meta.env.DEV) {
         document.getElementById('kernel-info').textContent = `6.18-Linux`;
         document.getElementById('kernel').classList.remove('animate-hidden');
+        // Still populate the KPM list so the dev UI matches prod behavior.
+        existedExtras = [];
+        renderKpmList();
         return;
     }
 

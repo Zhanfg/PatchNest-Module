@@ -78,6 +78,9 @@ mv kernel kernel.ori
 # ============================================================
 echo "- Validating embedded modules..."
 validate_failed=0
+# Use a positional parse so the first -M <file> is also captured.
+# prev_flag is initialized to a sentinel that will never match a real flag.
+prev_flag="__start__"
 for arg in "$@"; do
     case "$prev_flag" in
         -M)
@@ -85,6 +88,7 @@ for arg in "$@"; do
             if [ ! -f "$kpm_file" ]; then
                 echo "! Embedded KPM not found: $kpm_file"
                 validate_failed=1
+                prev_flag="$arg"
                 continue
             fi
             # Check ELF magic (7f 45 4c 46)
@@ -92,13 +96,15 @@ for arg in "$@"; do
             if [ "$magic" != "7f454c46" ]; then
                 echo "! Invalid ELF: $kpm_file (magic=$magic)"
                 validate_failed=1
+                prev_flag="$arg"
                 continue
             fi
-            # Check aarch64 (e_machine = 0xB7 at offset 18)
+            # Check aarch64 (e_machine = 0xB7 at offset 18, little-endian)
             machine=$(xxd -s 18 -l 2 -e "$kpm_file" 2>/dev/null | awk '{print $2}')
-            if [ "$machine" != "000000b7" ] && [ "$machine" != "b700" ]; then
+            if [ "$machine" != "000000b7" ]; then
                 echo "! Not aarch64: $kpm_file"
                 validate_failed=1
+                prev_flag="$arg"
                 continue
             fi
             # Try kptools validation if available
@@ -134,21 +140,24 @@ if [ $patch_rc -ne 0 ]; then
 fi
 
 echo "- Repacking boot image"
-magiskboot repack "$BOOTIMAGE" >/dev/null 2>&1
-
-if [ $? -ne 0 ]; then
-  >&2 echo "! Repack error: $?"
+if ! magiskboot repack "$BOOTIMAGE" >/dev/null 2>&1; then
+  >&2 echo "! Repack error"
   exit 1
 fi
 
 if [ "$FLASH_TO_DEVICE" = "true" ]; then
   # flash
-  if [ -b "$BOOTIMAGE" ] || [ -c "$BOOTIMAGE" ] && [ -f "new-boot.img" ]; then
-    echo "- Flashing new boot image"
-    flash_image new-boot.img "$BOOTIMAGE"
-    if [ $? -ne 0 ]; then
-      >&2 echo "! Flash error: $?"
-      save_image_to_storage "new-boot.img"
+  if [ -b "$BOOTIMAGE" ] || [ -c "$BOOTIMAGE" ]; then
+    if [ -f "new-boot.img" ]; then
+      echo "- Flashing new boot image"
+      flash_image new-boot.img "$BOOTIMAGE"
+      if [ $? -ne 0 ]; then
+        >&2 echo "! Flash error"
+        save_image_to_storage "new-boot.img"
+        exit 1
+      fi
+    else
+      >&2 echo "! new-boot.img missing — refusing to flash"
       exit 1
     fi
   fi

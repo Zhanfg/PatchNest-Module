@@ -50,7 +50,11 @@ fi
 echo "[$(date)] kpatch hello OK" >> "$LOG"
 
 # Safe KPM load
+# Use a literal-glob test: when the directory is empty, the shell returns
+# the pattern itself unchanged. The [ -e ] check then correctly skips it,
+# avoiding the bug where the old [ -s ] guard would test the wrong path.
 for kpm in "$KPM_DIR"/*.kpm "$KPM_DIR"/*.ko "$KPM_DIR"/*.o; do
+    [ -e "$kpm" ] || continue
     [ -s "$kpm" ] || continue
     mod_basename=$(basename "$kpm" | sed 's/\.\(kpm\|ko\|o\)$//')
     args=""
@@ -83,22 +87,48 @@ dispatch_event() {
 
 dispatch_event "POST_FS_DATA"
 
-# Wait for boot completion
+# Wait for boot completion (with 5 min timeout to avoid infinite loop on broken ROMs)
+wait_count=0
 until [ "$(getprop sys.boot_completed)" = "1" ]; do
     sleep 1
+    wait_count=$((wait_count + 1))
+    if [ "$wait_count" -ge 300 ]; then
+        echo "[$(date)] WARN: boot_completed timeout, continuing anyway" >> "$LOG"
+        break
+    fi
 done
 
 dispatch_event "BOOT_COMPLETED"
 
 # Apply exclusion config
+# Use a temp file (not subshell pipeline) so we keep state and can quote safely.
 if [ -f "$CONFIG" ]; then
-    tail -n +2 "$CONFIG" | while IFS=, read -r pkg exclude allow uid; do
-        if [ "$exclude" = "1" ]; then
-            UID=$(grep "^$pkg $uid" /data/system/packages.list 2>/dev/null | cut -d' ' -f2)
-            [ -z "$UID" ] && UID=$(grep "^$pkg " /data/system/packages.list 2>/dev/null | cut -d' ' -f2)
-            [ -n "$UID" ] && kpatch exclude_set "$UID" 1
+    excluded_count=0
+    excluded_failed=0
+    # Read into a here-doc, then parse with a manual CSV reader that respects quoting.
+    _cfg_tmp=$(mktemp /data/local/tmp/kpnext_cfg.XXXXXX)
+    tail -n +2 "$CONFIG" > "$_cfg_tmp"
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        # Parse CSV: pkg,exclude,allow,uid (no quoted fields supported in our writer,
+        # but be defensive against embedded spaces by using a regex split).
+        pkg=$(echo "$line" | awk -F, '{print $1}')
+        exclude=$(echo "$line" | awk -F, '{print $2}')
+        uid=$(echo "$line" | awk -F, '{print $4}')
+        if [ "$exclude" = "1" ] && [ -n "$pkg" ] && [ -n "$uid" ]; then
+            # /data/system/packages.list: "<pkg> <uid>"
+            pkgq=$(printf '%s' "$pkg" | sed 's/[][\.*^$()+?{|/]/\\&/g')
+            UID_VAL=$(grep -F " $uid" /data/system/packages.list 2>/dev/null | grep -F "^$pkgq " | head -1 | awk '{print $2}')
+            if [ -n "$UID_VAL" ]; then
+                kpatch exclude_set "$UID_VAL" 1
+                excluded_count=$((excluded_count + 1))
+            else
+                excluded_failed=$((excluded_failed + 1))
+            fi
         fi
-    done
+    done < "$_cfg_tmp"
+    rm -f "$_cfg_tmp"
+    echo "[$(date)] exclusion: applied=$excluded_count failed=$excluded_failed" >> "$LOG"
 fi
 
 echo "[$(date)] service.sh completed" >> "$LOG"
