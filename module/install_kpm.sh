@@ -51,8 +51,7 @@ ZIP_FILE="$1"
 #
 # Pattern order matters in POSIX case-glob: each branch is checked
 # top-to-bottom, so put the most-specific rejections first to avoid
-# shellcheck SC2221/SC2222 warnings about a "later" branch being
-# unreachable.
+# shellcheck complaints about a later branch being unreachable.
 case "$ZIP_FILE" in
     # Reject empty or absolute paths outright.
     "" | /*)
