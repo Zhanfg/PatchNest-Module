@@ -131,6 +131,61 @@ if [[ ! -f "module/bin/kp-safemode" && -n "$ANDROID_NDK_HOME" ]]; then
     fi
 fi
 
+# Build the anti-detect KPM suite (module/kpms/*.c -> module/kpms/*.kpm).
+# Each .c file becomes a position-independent shared object loaded by
+# the KernelPatch supervisor. -shared -fPIC is required for KP modules.
+# We also embed a unique build-id section so the WebUI dashboard can
+# detect which .kpm is loaded vs. just on disk.
+if [[ -n "$ANDROID_NDK_HOME" && -d "module/kpms" ]]; then
+    if [[ ! -x "$NDK_CLANG" ]]; then
+        NDK_CLANG="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
+        if [[ ! -x "$NDK_CLANG" ]]; then
+            NDK_CLANG="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
+        fi
+    fi
+    if [[ -x "$NDK_CLANG" ]]; then
+        echo "Building anti-detect KPM suite with NDK clang..."
+        mkdir -p module/kpms/built
+        BUILD_ID="$(git rev-parse --short HEAD 2>/dev/null || echo local)"
+        for src in module/kpms/*.c; do
+            [[ -f "$src" ]] || continue
+            base="$(basename "$src" .c)"
+            out="module/kpms/built/${base}.kpm"
+            if [[ -f "$out" && "$out" -nt "$src" ]]; then
+                echo "  ✓ ${base}.kpm (cached)"
+                continue
+            fi
+            # -shared -fPIC is required for KP module format
+            # -nostdlib -fno-builtin keeps the module lean
+            # -Wl,-soname= sets the runtime loadable name
+            if "$NDK_CLANG" -static -O2 -Wall -Wextra -fPIC \
+                -shared -nostdlib -fno-builtin \
+                -Wl,--build-id=sha1 \
+                -DKPM_BUILD_ID="\"$BUILD_ID\"" \
+                -DKPM_BUILD_TIME="\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"" \
+                -o "$out" "$src" 2>&1; then
+                # Append a small JSON manifest that the WebUI reads.
+                # Format: 8-byte magic "KPMM" + 4-byte version + json blob
+                # (kept short so the .kpm stays < 32 KB).
+                manifest=$(printf '{"id":"%s","build":"%s","time":"%s","size":%d}' \
+                    "$base" "$BUILD_ID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                    "$(stat -c %s "$out" 2>/dev/null || echo 0)")
+                printf 'KPMM\x01\x00\x00\x00%-5s' "$base" > /tmp/kpm_manifest_hdr
+                printf '%s' "$manifest" >> /tmp/kpm_manifest_hdr
+                cat "$out" /tmp/kpm_manifest_hdr > "${out}.tmp"
+                mv "${out}.tmp" "$out"
+                rm /tmp/kpm_manifest_hdr
+                chmod 0644 "$out"
+                echo "  ✓ ${base}.kpm ($(stat -c %s "$out") bytes)"
+            else
+                echo "  ✗ ${base} build FAILED" >&2
+            fi
+        done
+    else
+        echo "⚠ NDK clang not found; skipping anti-detect KPM build"
+    fi
+fi
+
 # zip module
 commit_number=$(git rev-list --count HEAD)
 commit_hash=$(git rev-parse --short HEAD)

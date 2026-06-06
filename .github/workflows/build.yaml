@@ -315,6 +315,44 @@ jobs:
         chmod +x module/bin/kp-safemode
         file module/bin/kp-safemode
 
+    # === Build anti-detect KPM suite (module/kpms/*.c -> *.kpm) ===
+    - name: Build anti-detect KPM suite
+      run: |
+        NDK_CLANG="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
+        if [ ! -x "$NDK_CLANG" ]; then
+          NDK_CLANG="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
+        fi
+        mkdir -p module/kpms/built
+        BUILD_ID="${{ github.sha }}"
+        BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        for src in module/kpms/*.c; do
+          [ -f "$src" ] || continue
+          base=$(basename "$src" .c)
+          out="module/kpms/built/${base}.kpm"
+          "$NDK_CLANG" --target=aarch64-linux-android24 -static -O2 -Wall -Wextra \
+            -fPIC -shared -nostdlib -fno-builtin -Wl,--build-id=sha1 \
+            -DKPM_BUILD_ID="\"$BUILD_ID\"" \
+            -DKPM_BUILD_TIME="\"$BUILD_TIME\"" \
+            -o "$out" "$src"
+          chmod 0644 "$out"
+          # Append the WebUI manifest tail (8-byte magic + base + json).
+          manifest=$(printf '{"id":"%s","build":"%s","time":"%s","size":%d}' \
+            "$base" "${BUILD_ID:0:7}" "$BUILD_TIME" \
+            "$(stat -c %s "$out")")
+          ( printf 'KPMM\x01\x00\x00\x00'; \
+            printf '%-5s' "$base"; \
+            printf '%s' "$manifest" ) > /tmp/manifest
+          cat "$out" /tmp/manifest > "${out}.tmp"
+          mv "${out}.tmp" "$out"
+          rm /tmp/manifest
+          echo "  ✓ ${base}.kpm ($(stat -c %s "$out") bytes)"
+        done
+        # Verify the suite — make sure all 6 KPMs built and look like
+        # valid aarch64 ELF files.
+        file module/kpms/built/*.kpm | grep -q "ARM aarch64" \
+          || { echo "::error::anti-detect KPM suite failed ELF check"; exit 1; }
+        ls -la module/kpms/built/
+
     # === WebUI ===
     - uses: pnpm/action-setup@v4
       with: { version: 'latest' }
