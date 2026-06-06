@@ -19,12 +19,13 @@ jobs:
 
     # P0-4 fix: install Android NDK before any step that references
     # $ANDROID_NDK_HOME. Without this, kp-safemode was never being built
-    # in CI despite the CHANGELOG claiming it was.
+    # in CI despite the CHANGELOG claiming it was. The action's input
+    # is `ndk-version`, not `version`; `local` and `log` are not
+    # valid inputs (the runner's tool-cache is the default).
     - name: Setup Android NDK
       uses: nttld/setup-ndk@v1
       with:
-        local: true
-        version: r26d
+        ndk-version: r26d
         log: error
 
     - name: ShellCheck
@@ -147,8 +148,7 @@ jobs:
     - name: Setup Android NDK
       uses: nttld/setup-ndk@v1
       with:
-        local: true
-        version: r26d
+        ndk-version: r26d
         log: error
 
     - name: Load versions
@@ -357,14 +357,19 @@ jobs:
         TAG="${{ env.magiskboot }}"
         ARGS=("-R" "topjohnwu/Magisk" "-p" "Magisk*.apk" "-O" "magisk.apk")
         if [ "$TAG" != "latest" ]; then gh release download "$TAG" "${ARGS[@]}"; else gh release download "${ARGS[@]}"; fi
-        # Verify Magisk APK integrity before extracting magiskboot
+        # Verify Magisk APK integrity before extracting magiskboot.
+        # MEDIUM (security review): previously this was a fail-open
+        # `::warning` if no SHA was pinned. Match the hard-fail
+        # behavior of the other binary-verification steps so a
+        # missing pin (a release-engineer mistake) cannot ship an
+        # unverified magiskboot to end users.
         get_ver() { grep "^$1[[:space:]]*=" version.properties | cut -d'=' -f2 | xargs; }
         APK_SHA=$(get_ver "Magisk_apk_${{ env.magiskboot }}" || true)
-        if [ -n "$APK_SHA" ]; then
-          echo "$APK_SHA  magisk.apk" | sha256sum -c -
-        else
-          echo "::warning::No SHA256 pinned for Magisk APK in version.properties — skipping verification"
+        if [ -z "$APK_SHA" ]; then
+          echo "::error::No SHA256 pinned for Magisk APK in version.properties — refusing to extract unverified binary"
+          exit 1
         fi
+        echo "$APK_SHA  magisk.apk" | sha256sum -c -
         unzip -p magisk.apk 'lib/arm64-v8a/libmagiskboot.so' > module/bin/magiskboot
         rm magisk.apk
 
@@ -435,8 +440,15 @@ jobs:
         name: ${{ env.MODULE_NAME }}-${{ github.run_number }}
         path: module
 
+    # P1 (security review): guard against pull_request triggers that
+    # would otherwise mutate the published version catalog. The release
+    # job below depends on this job, so a PR can't directly publish
+    # a release — but the `check_tag` step would still set need_release
+    # based on PR-supplied update.json, and any error in that path
+    # could leak into the artifact upload. Reject early.
     - name: Check if valid to release
       id: check_tag
+      if: github.event_name != 'pull_request'
       run: |
           git fetch --tags
           VERSION="$(jq -r .version update.json)"
@@ -448,6 +460,11 @@ jobs:
             echo "version=$VERSION" >> $GITHUB_OUTPUT
             echo "need_release=true" >> $GITHUB_OUTPUT
           fi
+    - name: Suppress release on PRs
+      id: check_tag_pr
+      if: github.event_name == 'pull_request'
+      run: |
+          echo "need_release=false" >> $GITHUB_OUTPUT
 
   release:
     runs-on: ubuntu-latest

@@ -31,7 +31,6 @@
     <string name="title_binary_source">Binary Source</string>
     <string name="title_select_source">Select Binary Source</string>
     <!-- Buttons -->
-    <string name="button_install">Click to install</string>
     <string name="button_uninstall">Uninstall</string>
     <string name="button_embed_kpm">Embed KPM</string>
     <string name="button_start">Start</string>

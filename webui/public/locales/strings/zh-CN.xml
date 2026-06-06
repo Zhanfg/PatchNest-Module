@@ -246,4 +246,26 @@
     <string name="title_install_from_url">通过 URL 安装 KPM</string>
     <string name="hint_install_from_url">.kpm 或 .zip 文件直链。建议使用带 SHA256 校验的模块。</string>
     <string name="button_install">安装</string>
+
+      <string name="tag_signed">Signed</string>
+      <string name="title_auto_unpatch">Auto-Unpatch Recovery Plan</string>
+      <string name="button_continue">Continue</string>
+      <string name="yes">yes</string>
+      <string name="no">no</string>
+      <string name="auto_unpatch_summary">Your backup is: %1$s (%2$s)\nVerified: %3$s</string>
+      <string name="auto_unpatch_no_backup">No backup found. Auto-unpatch cannot run safely.</string>
+      <string name="auto_unpatch_no_backup_warn">Proceeding will leave the device in an unpatched state with no recovery path.</string>
+      <string name="auto_unpatch_unverified_warn">This backup was NOT verified by magiskboot — proceed at your own risk.</string>
+      <string name="auto_unpatch_lose">If auto_unpatch runs, you will LOSE:</string>
+      <string name="auto_unpatch_lose_kp_patches">Kp kernel patches (kimg -Y)</string>
+      <string name="auto_unpatch_lose_kpm_modules">All loaded KPM modules (stealth-*, selinux_hook, etc.)</string>
+      <string name="auto_unpatch_lose_nothing">No Kp-specific state recorded in the backup.</string>
+      <string name="auto_unpatch_keep">You will KEEP:</string>
+      <string name="auto_unpatch_keep_magisk">Magisk root (AK3, version %1$s)</string>
+      <string name="auto_unpatch_keep_ksu">KernelSU (version %1$s)</string>
+      <string name="auto_unpatch_keep_non_kp">All non-Kp modifications in the backup.</string>
+      <string name="auto_unpatch_keep_unknown">Unknown — manifest not found for this backup.</string>
+      <string name="msg_unpatch_done">Unpatch complete.</string>
+      <string name="msg_unpatch_failed">Unpatch failed: %1$s</string>
+      <string name="msg_cancelled">Cancelled.</string>
 </resources>
