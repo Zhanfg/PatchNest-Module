@@ -602,10 +602,14 @@ async function handleFileUpload(accept, containerId, onSelected) {
         const abortController = new AbortController();
         const loadingCard = document.createElement('div');
         loadingCard.className = 'card module-card';
+        // P0-fix (ultracode-audit-2026-06-06): escape file.name. A
+        // user-selected KPM zip named e.g. "<img src=x onerror=alert(1)>.kpm"
+        // would otherwise be injected as raw HTML and could call out to
+        // attacker-controlled code in the WebView.
         loadingCard.innerHTML = `
             <div class="module-card-header flex-header">
                 <div class="header-info">
-                    <div class="module-card-title">${file.name}</div>
+                    <div class="module-card-title">${escapeHTML(file.name)}</div>
                     <div class="module-card-subtitle" id="upload-progress-text">${getString('msg_please_wait')}</div>
                 </div>
                 <md-outlined-icon-button id="cancel-upload">

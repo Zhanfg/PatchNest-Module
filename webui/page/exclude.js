@@ -84,7 +84,24 @@ async function saveExcludedList(excludedApps) {
     // Write via a quoted single-quoted heredoc and an explicit printf so a
     // malicious package name with " $ ` or \ cannot inject into the shell.
     // EOF delimiter is unique to the run; the leading '-' tolerates leading tabs.
-    const eof = `__KP_NEXT_EOF_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}__`;
+    // P0-fix (ultracode-audit-2026-06-06): the previous code used
+    // `Date.now() + Math.random()` to build the EOF token. Both are
+    // non-cryptographic; an attacker who can predict the timestamp
+    // window (~10ms) and the random suffix can craft CSV content
+    // containing the same EOF token and exit the heredoc early,
+    // then inject shell. Switch to crypto.getRandomValues, which
+    // is available in every WebView Chromium 92+ supports.
+    const eof = (() => {
+        const buf = new Uint8Array(8);
+        if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+            crypto.getRandomValues(buf);
+        } else {
+            for (let i = 0; i < 8; i++) buf[i] = Math.floor(Math.random() * 256);
+        }
+        let hex = '';
+        for (let i = 0; i < buf.length; i++) hex += buf[i].toString(16).padStart(2, '0');
+        return `__KP_NEXT_EOF_${Date.now().toString(36)}_${hex}__`;
+    })();
     await exec(`cat > ${escapeShell(persistDir + '/package_config')} <<'${eof}'\n${csvContent}\n${eof}`);
 }
 
@@ -360,7 +377,19 @@ async function exportExcludeList() {
     const csv = [header, ...lines].join('\n');
     // Write to a tmp file in modDir, then copy to Download. Going through
     // tmp means the heredoc-safe write logic is shared with saveExcludedList.
-    const eof = `__KP_NEXT_EOF_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}__`;
+    // P0-fix (ultracode-audit-2026-06-06): use crypto.getRandomValues
+    // instead of Math.random + Date.now alone — see saveExcludedList.
+    const eof = (() => {
+        const buf = new Uint8Array(8);
+        if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+            crypto.getRandomValues(buf);
+        } else {
+            for (let i = 0; i < 8; i++) buf[i] = Math.floor(Math.random() * 256);
+        }
+        let hex = '';
+        for (let i = 0; i < buf.length; i++) hex += buf[i].toString(16).padStart(2, '0');
+        return `__KP_NEXT_EOF_${Date.now().toString(36)}_${hex}__`;
+    })();
     const tmp = `${persistDir}/export_exclude.csv`;
     const result = await exec(
         `cat > ${escapeShell(tmp)} <<'${eof}'\n${csv}\n${eof}`

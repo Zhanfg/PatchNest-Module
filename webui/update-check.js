@@ -6,6 +6,7 @@
 import { exec, toast } from 'kernelsu-alt';
 import { modDir } from './index.js';
 import { getString } from './language.js';
+import { escapeShell, sanitizeUrl } from './utils.js';
 
 const FETCH_TIMEOUT_MS = 8000;
 
@@ -165,9 +166,25 @@ function showUpdateDialog(localVer, remote) {
                     toast(getString('update_unsigned_warning'));
                     return;
                 }
+                // P0-fix (ultracode-audit-2026-06-06): the previous code
+                // interpolated `remote.zipUrl` directly into a shell exec
+                // template literal. update.json is fetched over the network
+                // and is attacker-controlled (e.g. a compromised mirror or
+                // MITM). A malicious zipUrl like `https://x'; rm -rf / #`
+                // would have been passed to `am start` as two shell tokens,
+                // opening a root RCE chain on the device. Two defenses:
+                //   1. Reject any URL that isn't http(s) before doing
+                //      anything with it.
+                //   2. Always pass the URL through escapeShell() so the
+                //      exec call gets a single, double-quoted argument.
+                const safeUrl = sanitizeUrl(remote.zipUrl);
+                if (!safeUrl) {
+                    toast(getString('update_invalid_url'));
+                    return;
+                }
                 // Use am start to let the browser/system download manager
                 // handle the actual download.
-                exec(`am start -a android.intent.action.VIEW -d ${remote.zipUrl}`)
+                exec(`am start -a android.intent.action.VIEW -d ${escapeShell(safeUrl)}`)
                     .then(() => toast(getString('update_download_started')))
                     .catch(() => toast(getString('update_download_failed')));
             } else {

@@ -169,6 +169,33 @@ jobs:
         if [ "$TAG" != "latest" ]; then gh release download "$TAG" "${ARGS[@]}"; else gh release download "${ARGS[@]}"; fi
         mv module/bin/kpatch-android module/bin/kpatch
 
+    # P1-fix (ultracode-audit-2026-06-06): verify SHA256 of every
+    # downloaded root-level binary against the value pinned in
+    # version.properties. Previously the CI arm64-test job skipped
+    # this check, so a MITM or compromised upstream could substitute
+    # a malicious kpatch/kptools/kpimg into a release. We source
+    # version.properties directly (instead of via $GITHUB_ENV) so
+    # the comparison picks up the same keys the local build.sh uses.
+    - name: Verify SHA256 of downloaded binaries
+      run: |
+        #!/bin/bash
+        set -euo pipefail
+        get_ver() { grep "^$1[[:space:]]*=" version.properties | cut -d'=' -f2 | xargs; }
+        check() {
+          local name="$1" tag="$2" file="$3"
+          local key="${name//[-.]/_}_${tag}"
+          local expected
+          expected=$(get_ver "$key" || true)
+          if [[ -z "$expected" ]]; then
+            echo "::error::No SHA256 pinned in version.properties for $key — refusing to run unverified binary $file"
+            exit 1
+          fi
+          echo "$expected  $file" | sha256sum -c -
+        }
+        check "kpimg-linux"   "${{ env['kernelpatch'] }}" module/bin/kpimg
+        check "kptools-android" "${{ env['kernelpatch'] }}" module/bin/kptools
+        check "kpatch-android"  "${{ env['kpatch-next'] }}" module/bin/kpatch
+
     - name: Verify binary format (ELF64 aarch64)
       run: |
         echo "=== Binary Format Check ==="
@@ -293,6 +320,34 @@ jobs:
         ARGS=("-R" "KernelSU-Next/KPatch-Next" "-p" "kpatch-android" "-D" "module/bin")
         if [ "$TAG" != "latest" ]; then gh release download "$TAG" "${ARGS[@]}"; else gh release download "${ARGS[@]}"; fi
         mv module/bin/kpatch-android module/bin/kpatch
+
+    # P1-fix (ultracode-audit-2026-06-06): verify SHA256 of every
+    # root-level binary before they get packaged into the release
+    # zip. Without this, a compromised release artifact (or a
+    # simple tag-mismatch in version.properties) would silently
+    # ship a malicious binary to every user. We use the same
+    # version.properties keys the local build.sh uses, so the CI
+    # check is consistent with what a maintainer running build.sh
+    # locally would see.
+    - name: Verify SHA256 of downloaded binaries
+      run: |
+        #!/bin/bash
+        set -euo pipefail
+        get_ver() { grep "^$1[[:space:]]*=" version.properties | cut -d'=' -f2 | xargs; }
+        check() {
+          local name="$1" tag="$2" file="$3"
+          local key="${name//[-.]/_}_${tag}"
+          local expected
+          expected=$(get_ver "$key" || true)
+          if [[ -z "$expected" ]]; then
+            echo "::error::No SHA256 pinned in version.properties for $key — refusing to package unverified binary $file"
+            exit 1
+          fi
+          echo "$expected  $file" | sha256sum -c -
+        }
+        check "kpimg-linux"   "${{ env['kernelpatch'] }}" module/bin/kpimg
+        check "kptools-android" "${{ env['kernelpatch'] }}" module/bin/kptools
+        check "kpatch-android"  "${{ env['kpatch-next'] }}" module/bin/kpatch
 
     # === Magiskboot ===
     - name: Download magiskboot

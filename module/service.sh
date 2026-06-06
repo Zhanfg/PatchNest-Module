@@ -4,7 +4,14 @@ MODDIR=${0%/*}
 KPNDIR="/data/adb/kp-next"
 PATH="$MODDIR/bin:$PATH"
 CONFIG="$KPNDIR/package_config"
-REHOOK="$(cat $KPNDIR/rehook 2>/dev/null)"
+# P1-fix (ultracode-audit-2026-06-06): quote $KPNDIR. If the path
+# ever contains a space (custom user layout, su bind-mount trick,
+# or future Magisk layout change) the previous form would word-split
+# into two paths and `cat` would error out — masking the real
+# config. The sanitization of $REHOOK below also defends against
+# a hostile $KPNDIR/rehook file (only off|enable|disable|empty
+# are accepted).
+REHOOK="$(cat "$KPNDIR/rehook" 2>/dev/null || true)"
 LOG="$KPNDIR/service.log"
 KPM_DIR="$KPNDIR/kpm"
 KPM_EVENT_DIR="$KPNDIR/kpm_events"
@@ -74,7 +81,19 @@ echo "[$(date)] KPM_SIGNATURE_POLICY=$KPM_SIGNATURE_POLICY" >> "$LOG"
 # Detect root manager
 ROOT_MGR="unknown"
 if [ -f "$KPNDIR/root_manager" ]; then
-    ROOT_MGR="$(cat $KPNDIR/root_manager)"
+    # P1-fix (ultracode-audit-2026-06-06): quote $KPNDIR in the cat
+    # call, and sanitize the value to a safe character class. The
+    # /data/adb/kp-next/root_manager file is written by customize.sh
+    # (only 'apatch'|'ksu'|'magisk'|'unknown' values), but if a
+    # future installer writes a tampered value here, an unquoted
+    # expansion could break later `case` statements. The whitelist
+    # sanitization prevents the value from containing shell
+    # metacharacters that could affect any downstream use.
+    _rm_raw="$(cat "$KPNDIR/root_manager" 2>/dev/null || true)"
+    _rm_sane="$(printf '%s' "$_rm_raw" | tr -cd 'a-z')"
+    if [ -n "$_rm_sane" ]; then
+        ROOT_MGR="$_rm_sane"
+    fi
 fi
 echo "[$(date)] root_manager=$ROOT_MGR" >> "$LOG"
 
@@ -155,7 +174,7 @@ for kpm in "$KPM_DIR"/*.kpm "$KPM_DIR"/*.ko "$KPM_DIR"/*.o; do
         fi
     fi
 
-    if ! kpatch kpm load "$kpm" $args; then
+    if ! kpatch kpm load "$kpm" -- "$args"; then
         echo "[$(date)] Failed to load: $(basename "$kpm"), moving to failed/" >> "$LOG"
         mv "$kpm" "$KPM_DIR/failed/$(basename "$kpm")"
     else

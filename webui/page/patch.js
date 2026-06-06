@@ -345,7 +345,11 @@ async function embedKPM() {
         try {
             await uploadFile(file, tmpPath, onProgress, signal);
         } catch (e) {
-            exec(`rm -f ${tmpPath}`);
+            // P0-fix (ultracode-audit-2026-06-06): quote ${tmpPath} so a
+            // malicious filename with whitespace can't be interpreted
+            // as two separate args to `rm`. randName is built from
+            // randomUUID/crypto, but defence-in-depth: belt + braces.
+            exec(`rm -f ${escapeShell(tmpPath)}`);
             throw e;
         } finally {
             embedBtn.disabled = false;

@@ -41,7 +41,20 @@ get_prop() {
 }
 
 ZIP_FILE="$1"
-if [ -z "$ZIP_FILE" ] || [ ! -f "$ZIP_FILE" ]; then
+# P1-fix (ultracode-audit-2026-06-06): also reject any $ZIP_FILE that
+# contains a path-traversal sequence, an absolute path, or a shell
+# metacharacter. The file is later opened by unzip into a tmpdir; even
+# though unzip -o can't write outside the tmpdir, a malicious filename
+# could let a separate process (e.g. a malicious pre-existing .kpm.sig
+# check) confuse the manifest parser. The whitelist allows KPM zip
+# filenames that look like the canonical KPM naming we generate.
+case "$ZIP_FILE" in
+    ""|*[!A-Za-z0-9._/+@%=-]*|/.*|*../*|*/../*|*/./*)
+        echo "! install_kpm.sh: refusing to install with unsafe zip filename: '$ZIP_FILE'" >&2
+        exit 2
+        ;;
+esac
+if [ ! -f "$ZIP_FILE" ]; then
     echo "! Usage: install_kpm.sh <path_to_zip>"
     exit 1
 fi
@@ -74,6 +87,12 @@ MOD_EVENT=$(get_prop "$TMPDIR/module.prop" "event")
 MOD_ARGS=$(get_prop "$TMPDIR/module.prop" "args")
 MOD_AUTOLOAD=$(get_prop "$TMPDIR/module.prop" "autoLoad")
 
+# P0-fix (ultracode-audit-2026-06-06): sanitize MOD_ARGS to the same
+# safe character class that service.sh applies at load time. The args
+# file is parsed in shell context; without sanitization, a malicious
+# module.prop with args='$(id)' would execute on the user's device.
+MOD_ARGS="$(printf '%s' "$MOD_ARGS" | tr -cd 'A-Za-z0-9_=,.+:/@% -')"
+
 # Defaults
 MOD_ID="${MOD_ID:-unknown}"
 MOD_NAME="${MOD_NAME:-$MOD_ID}"
@@ -83,6 +102,31 @@ MOD_AUTOLOAD="${MOD_AUTOLOAD:-true}"
 if [ -z "$MOD_ID" ] || [ "$MOD_ID" = "unknown" ]; then
     # Generate ID from filename
     MOD_ID=$(basename "$ZIP_FILE" .zip | tr ' ' '_')
+fi
+
+# P0-fix (ultracode-audit-2026-06-06, finding NEW-001): sanitize
+# MOD_ID and any other module.prop value that flows into a path
+# interpolation. Without this, a crafted KPM zip with
+#   id=../../system/xbin/foo
+# would let install_kpm.sh write a .kpm file to an arbitrary
+# root-owned path on the user's device. The whitelist matches the
+# sanitization pattern used by service.sh for args.
+MOD_ID="$(printf '%s' "$MOD_ID" | tr -cd 'A-Za-z0-9_.-')"
+# Also sanitize the other fields that are echoed into the kpm
+# events dir, even though they don't directly form paths.
+MOD_NAME="$(printf '%s' "$MOD_NAME" | tr -cd 'A-Za-z0-9 _.-')"
+MOD_VERSION="$(printf '%s' "$MOD_VERSION" | tr -cd 'A-Za-z0-9_.+-')"
+MOD_AUTHOR="$(printf '%s' "$MOD_AUTHOR" | tr -cd 'A-Za-z0-9_@. -')"
+MOD_EVENT="$(printf '%s' "$MOD_EVENT" | tr -cd 'A-Za-z0-9_,')"
+
+# Reject empty / unsafe IDs after sanitization. A MOD_ID that
+# collapses to empty means the KPM's id field was all non-ASCII
+# (or all dots) — refuse rather than silently installing as
+# `.kpm`, which would clobber any file the user happens to have
+# named `.kpm` on the device.
+if [ -z "$MOD_ID" ] || [ "${#MOD_ID}" -gt 64 ] || [ "$MOD_ID" = "." ] || [ "$MOD_ID" = ".." ]; then
+    echo "! install_kpm.sh: refusing to install with unsafe id: '$MOD_ID'" >&2
+    exit 2
 fi
 
 log "Installing KPM: $MOD_NAME ($MOD_ID) v$MOD_VERSION"
@@ -180,11 +224,16 @@ cp "$TMPDIR/module.prop" "$KPM_ZIP_DIR/${MOD_ID}.prop"
 # Load module immediately if requested
 if [ "$MOD_AUTOLOAD" = "true" ]; then
     echo "- Loading module..."
+    # The double-dash ends kpatch's option parsing, so any leading
+    # '-' in $MOD_ARGS (or values that would otherwise be parsed as
+    # options) is preserved verbatim. $MOD_ARGS is itself quoted
+    # below so an args string with whitespace is passed as a single
+    # argument to kpatch kpm load.
     ARGS_OPT=""
     if [ -n "$MOD_ARGS" ]; then
-        ARGS_OPT="$MOD_ARGS"
+        ARGS_OPT="-- $MOD_ARGS"
     fi
-    kpatch kpm load "$KPM_DIR/${MOD_ID}.kpm" "$ARGS_OPT" 2>&1
+    kpatch kpm load "$KPM_DIR/${MOD_ID}.kpm" $ARGS_OPT 2>&1
     if [ $? -eq 0 ]; then
         log "Module $MOD_ID loaded successfully"
         echo "- Successfully installed and loaded: $MOD_NAME v$MOD_VERSION"
