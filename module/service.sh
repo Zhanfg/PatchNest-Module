@@ -59,7 +59,12 @@ for kpm in "$KPM_DIR"/*.kpm "$KPM_DIR"/*.ko "$KPM_DIR"/*.o; do
     mod_basename=$(basename "$kpm" | sed 's/\.\(kpm\|ko\|o\)$//')
     args=""
     if [ -f "$KPM_EVENT_DIR/${mod_basename}.args" ]; then
-        args="$(cat "$KPM_EVENT_DIR/${mod_basename}.args")"
+        # P0-8 security fix: the .args file lives under KPM_EVENT_DIR and is
+        # writable by anything running as root. Restrict to a safe character
+        # class so that a stray shell metacharacter cannot become an extra
+        # argument to `kpatch kpm load`.
+        raw_args="$(cat "$KPM_EVENT_DIR/${mod_basename}.args" 2>/dev/null || true)"
+        args="$(printf '%s' "$raw_args" | tr -cd 'A-Za-z0-9_=,.+:/@% -')"
     fi
     if ! kpatch kpm load "$kpm" $args; then
         echo "[$(date)] Failed to load: $(basename "$kpm"), moving to failed/" >> "$LOG"

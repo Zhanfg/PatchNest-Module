@@ -2,5 +2,7 @@
   "versionCode": 19,
   "version": "v0.2.4",
   "zipUrl": "https://github.com/Zhanfg/KPatch-Next-Module/releases/download/latest/KPatch-Next-Module.zip",
-  "changelog": "https://raw.githubusercontent.com/Zhanfg/KPatch-Next-Module/main/CHANGELOG.md"
+  "changelog": "https://raw.githubusercontent.com/Zhanfg/KPatch-Next-Module/main/CHANGELOG.md",
+  "zipSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "_p0_9_note": "P0-9: SHA256 placeholder — fill this in at release time by running `sha256sum out/KPatch-Next-*.zip`. The update checker in webui/update-check.js should download the zip and verify this hash before applying. The placeholder 00...00 is intentionally invalid so that unverified modules are rejected until the value is updated."
 }

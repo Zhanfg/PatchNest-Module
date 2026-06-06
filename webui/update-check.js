@@ -91,6 +91,9 @@ async function fetchRemoteInfo() {
             versionCode: data.versionCode || 0,
             zipUrl: data.zipUrl || '',
             changelog: data.changelog || '',
+            // P0-9: SHA256 hash of the release zip. Fetched at build time
+            // and written here by the release CI workflow.
+            zipSha256: data.zipSha256 || '',
         };
     } catch (_) {
         return null;
@@ -148,6 +151,20 @@ function showUpdateDialog(localVer, remote) {
         downloadBtn.onclick = () => {
             dialog.close();
             if (remote.zipUrl) {
+                // P0-9 security fix: if the update manifest contains a
+                // zipSha256 field (which it MUST for releases after v0.2.5),
+                // surface it to the user as a verification step. We do not
+                // attempt to download + verify inline here because that
+                // requires the zip to be cached locally and the WebView
+                // usually downloads to /sdcard/Download. The release CI
+                // pipeline is the trust boundary: maintainer must sign.
+                if (remote.zipSha256) {
+                    toast(getString('update_verify_sha', remote.zipSha256.slice(0, 16) + '…'));
+                } else {
+                    // Refuse to silently download an unsigned update.
+                    toast(getString('update_unsigned_warning'));
+                    return;
+                }
                 // Use am start to let the browser/system download manager
                 // handle the actual download.
                 exec(`am start -a android.intent.action.VIEW -d ${remote.zipUrl}`)

@@ -158,6 +158,8 @@
     <string name="update_download_started">正在打开下载...</string>
     <string name="update_download_failed">无法打开下载</string>
     <string name="update_no_url">update.json 中没有下载链接</string>
+    <string name="update_verify_sha">请校验 SHA-256 开头: %1$s</string>
+    <string name="update_unsigned_warning">此更新未签名。为安全起见拒绝自动下载。请手动校验 release 后再安装。</string>
     <string name="button_later">稍后</string>
     <string name="button_download">下载</string>
     <string name="status_checking">检查中...</string>

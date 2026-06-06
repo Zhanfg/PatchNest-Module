@@ -145,7 +145,17 @@ async function renderKpmList() {
             }
             item.querySelector('.unload').onclick = async () => {
                 const dialog = document.getElementById('unload-dialog');
-                dialog.querySelector('[slot=content]').innerHTML = `<div>${getString('msg_unload_module', moduleName)}</div>`;
+                // P0-7 security fix: previously this used innerHTML with an
+                // unescaped ${moduleName}. moduleName originates from
+                // `kpatch kpm list` (or install_kpm.sh which writes the id
+                // verbatim from a KPM's module.prop) — a malicious KPM
+                // could inject <script> or other HTML. Use textContent
+                // for the value and build the DOM safely.
+                const slot = dialog.querySelector('[slot=content]');
+                slot.textContent = '';
+                const div = document.createElement('div');
+                div.textContent = getString('msg_unload_module', moduleName);
+                slot.appendChild(div);
                 dialog.querySelector('.cancel').onclick = () => dialog.close();
                 dialog.querySelector('.confirm').onclick = async () => {
                     await unloadModule(moduleName);

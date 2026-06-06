@@ -159,6 +159,8 @@
     <string name="update_download_started">Opening download...</string>
     <string name="update_download_failed">Could not open download</string>
     <string name="update_no_url">No download URL in update.json</string>
+    <string name="update_verify_sha">Verify SHA-256 starts with: %1$s</string>
+    <string name="update_unsigned_warning">This update is NOT signed. Refusing to download for safety. Please install manually after verifying the release.</string>
     <string name="button_later">Later</string>
     <string name="button_download">Download</string>
     <string name="status_checking">Checking...</string>

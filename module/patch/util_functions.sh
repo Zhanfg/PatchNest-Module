@@ -39,7 +39,13 @@ getvar() {
   local PROPPATH='/data/.magisk /cache/.magisk'
   [ ! -z $MAGISKTMP ] && PROPPATH="$MAGISKTMP/.magisk/config $PROPPATH"
   VALUE=$(grep_prop $VARNAME $PROPPATH)
-  [ ! -z $VALUE ] && eval $VARNAME=\$VALUE
+  # P0-1 security fix: replace eval with printf -v and add a key allow-list
+  # to prevent shell-injection via attacker-controlled VALUE.
+  case "$VARNAME" in
+    KEEPVERITY|KEEPFORCEENCRYPT|RECOVERYMODE) ;;
+    *) abort "! getvar: unknown key '$VARNAME'";;
+  esac
+  [ -n "$VALUE" ] && printf -v "$VARNAME" '%s' "$VALUE"
 }
 
 is_mounted() {
@@ -257,11 +263,11 @@ find_boot_image() {
 }
 
 flash_image() {
-  local CMD1
-  case "$1" in
-    *.gz) CMD1="gzip -d < '$1' 2>/dev/null";;
-    *)    CMD1="cat '$1'";;
-  esac
+  # P0-2 security fix: previously this function built a shell command string
+  # by embedding $1 (the source file path) inside single-quotes and then ran
+  # it through `eval`, which allowed single-quote escape sequences in the
+  # path to execute arbitrary shell commands as root. We now branch into
+  # plain command pipelines — no eval, no string interpolation.
   if [ -b "$2" ]; then {
       local img_sz=$(stat -c '%s' "$1")
       local blk_sz=$(blockdev --getsize64 "$2")
@@ -270,14 +276,23 @@ flash_image() {
       blockdev --setrw "$2"
       local blk_ro=$(blockdev --getro "$2")
       [ "$blk_ro" -eq 1 ] && return 2
-      eval "$CMD1" | dd of="$2" bs="$blk_bs" iflag=fullblock conv=notrunc,fsync 2>/dev/null
+      case "$1" in
+        *.gz) gzip -d < "$1" 2>/dev/null | dd of="$2" bs="$blk_bs" iflag=fullblock conv=notrunc,fsync 2>/dev/null;;
+        *)    cat "$1"                   | dd of="$2" bs="$blk_bs" iflag=fullblock conv=notrunc,fsync 2>/dev/null;;
+      esac
       sync
   } elif [ -c "$2" ]; then {
       flash_eraseall "$2" >&2
-      eval "$CMD1" | nandwrite -p "$2" - >&2
+      case "$1" in
+        *.gz) gzip -d < "$1" 2>/dev/null | nandwrite -p "$2" - >&2;;
+        *)    cat "$1"                   | nandwrite -p "$2" - >&2;;
+      esac
   } else {
       echo "- Not block or char device, storing image"
-      eval "$CMD1" > "$2" 2>/dev/null
+      case "$1" in
+        *.gz) gzip -d < "$1" > "$2" 2>/dev/null;;
+        *)    cat    "$1"    > "$2" 2>/dev/null;;
+      esac
   } fi
   return 0
 }

@@ -53,7 +53,20 @@ inactive="Status: inactive"
 info="info: kernel not patched yet"
 string="$inactive | $info | $ROOT_MGR"
 
-until [ "$(getprop sys.boot_completed)" = "1" ]; do
+# P0-6 fix: the previous `until` loop with no timeout would hang forever
+# on devices where getprop is broken or SELinux blocks the read. Bound
+# the wait to 5 minutes (matching service.sh's timeout) and fall through
+# with a "boot timeout" status so the user gets visible feedback.
+BOOT_WAIT_MAX=300  # 5 minutes
+i=0
+while [ "$(getprop sys.boot_completed)" != "1" ]; do
+    i=$((i + 1))
+    if [ "$i" -ge "$BOOT_WAIT_MAX" ]; then
+        string="$inactive | info: boot timeout ($BOOT_WAIT_MAX s) | $ROOT_MGR"
+        restore_prop_if_needed
+        set_prop "description" "$string" "$PROP_FILE"
+        exit 0
+    fi
     sleep 1
 done
 

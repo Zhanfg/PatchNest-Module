@@ -18,6 +18,16 @@ jobs:
     steps:
     - uses: actions/checkout@v6
 
+    # P0-4 fix: install Android NDK before any step that references
+    # $ANDROID_NDK_HOME. Without this, kp-safemode was never being built
+    # in CI despite the CHANGELOG claiming it was.
+    - name: Setup Android NDK
+      uses: nttld/setup-ndk@v1
+      with:
+        local: true
+        version: r26d
+        log: error
+
     - name: ShellCheck
       run: |
         sudo apt-get install -y shellcheck
@@ -129,6 +139,16 @@ jobs:
 
     - name: Install QEMU user-mode
       run: sudo apt-get update && sudo apt-get install -y qemu-user-static binfmt-support
+
+    # P0-4 fix: install Android NDK for kp-safemode cross-compilation.
+    # Previously $ANDROID_NDK_HOME was never provisioned, so the build
+    # step silently skipped and kp-safemode was never shipped.
+    - name: Setup Android NDK
+      uses: nttld/setup-ndk@v1
+      with:
+        local: true
+        version: r26d
+        log: error
 
     - name: Load versions
       run: grep -v '^#' version.properties | sed -e 's/ *= */=/g' -e 's/"//g' >> $GITHUB_ENV
