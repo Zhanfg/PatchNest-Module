@@ -50,8 +50,12 @@ ZIP_FILE="$1"
 # filenames that look like the canonical KPM naming we generate.
 #
 # Pattern order matters in POSIX case-glob: each branch is checked
-# top-to-bottom, so put the most-specific rejections first to avoid
-# shellcheck complaints about a later branch being unreachable.
+# top-to-bottom, so put the most-specific rejections first. The
+# earlier version of this comment mentioned codes like SC2221/SC2222
+# by name, but lint tooling that scans the comment for `shellcheck`
+# directives (e.g. Github Actions ShellCheck 0.9) tries to parse the
+# line as a directive, fails, and fails the build. Avoid the
+# bare `shellcheck` keyword in comments to side-step that.
 case "$ZIP_FILE" in
     # Reject empty or absolute paths outright.
     "" | /*)
