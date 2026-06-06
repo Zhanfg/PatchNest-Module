@@ -127,4 +127,24 @@
     <string name="patch_step_repack">Repack gambar boot</string>
     <string name="patch_step_flash">Flash ke perangkat</string>
     <string name="patch_step_unpatch">Batalkan patch kernel</string>
+    <!-- Backup SHA256 -->
+    <string name="button_copy_hash">Salin SHA256</string>
+    <string name="msg_hash_copied">SHA256 disalin</string>
+    <string name="msg_hash_copy_failed">Gagal menyalin</string>
+    <!-- Boot/kernel metadata -->
+    <string name="info_security_patch">Patch keamanan: %1</string>
+    <string name="info_os_version">Versi OS: %1</string>
+    <string name="info_size">Ukuran: %1</string>
+    <!-- KPM filter chips -->
+    <string name="filter_all">Semua</string>
+    <string name="filter_loaded">Termuat</string>
+    <string name="filter_with_event">Dengan event</string>
+    <!-- Exclude list import/export -->
+    <string name="button_export">Ekspor</string>
+    <string name="button_import">Impor</string>
+    <string name="msg_export_empty">Tidak ada aplikasi yang dikecualikan untuk diekspor</string>
+    <string name="msg_export_success">Diekspor ke %1</string>
+    <string name="msg_export_failed">Gagal mengekspor</string>
+    <string name="msg_import_success">%1 aplikasi diimpor</string>
+    <string name="msg_import_failed">Gagal mengimpor: %1</string>
 </resources>

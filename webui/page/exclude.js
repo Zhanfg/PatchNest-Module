@@ -275,6 +275,95 @@ function applyFilters() {
     }
 }
 
+/**
+ * Export the current exclude list to /storage/emulated/0/Download/ so the
+ * user can move it between devices or back it up before flashing a new ROM.
+ * File format is the same CSV the on-device service.sh reads.
+ */
+async function exportExcludeList() {
+    if (excludedApps.length === 0) {
+        toast(getString('msg_export_empty'));
+        return;
+    }
+    const header = 'pkg,exclude,allow,uid';
+    const lines = excludedApps.map(app => `${app.packageName},1,0,${app.uid % 100000}`);
+    const csv = [header, ...lines].join('\n');
+    // Write to a tmp file in modDir, then copy to Download. Going through
+    // tmp means the heredoc-safe write logic is shared with saveExcludedList.
+    const eof = `__KP_NEXT_EOF_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}__`;
+    const tmp = `${persistDir}/export_exclude.csv`;
+    const result = await exec(
+        `cat > ${escapeShell(tmp)} <<'${eof}'\n${csv}\n${eof}`
+    );
+    if (result.errno !== 0) {
+        toast(getString('msg_export_failed'));
+        return;
+    }
+    const dest = `/storage/emulated/0/Download/kp-next-exclude-${Date.now()}.csv`;
+    const cp = await exec(
+        `cp ${escapeShell(tmp)} ${escapeShell(dest)} && rm -f ${escapeShell(tmp)}`
+    );
+    toast(cp.errno === 0
+        ? getString('msg_export_success', dest)
+        : getString('msg_export_failed'));
+}
+
+/**
+ * Import an exclude list from a user-supplied file. Opens a file picker
+ * for .csv files and applies the entries, merging with the current set.
+ * The picker uses a hidden <input type="file"> created on demand.
+ */
+function importExcludeList() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.csv,text/csv,text/plain';
+    input.style.position = 'fixed';
+    input.style.opacity = '0';
+    input.style.pointerEvents = 'none';
+    document.body.appendChild(input);
+
+    let cleaned = false;
+    const cleanup = () => {
+        if (cleaned) return;
+        cleaned = true;
+        if (input.parentNode) input.parentNode.removeChild(input);
+    };
+    input.addEventListener('change', async () => {
+        cleanup();
+        const file = input.files && input.files[0];
+        if (!file) return;
+        try {
+            const text = await file.text();
+            // Parse CSV: skip header line if present, then expect 4 columns.
+            const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+            const dataLines = lines[0] && lines[0].startsWith('pkg,') ? lines.slice(1) : lines;
+            let added = 0;
+            for (const line of dataLines) {
+                const parts = line.split(',');
+                if (parts.length < 4) continue;
+                const pkg = parts[0].trim();
+                const uid = parseInt(parts[3].trim());
+                if (!pkg || isNaN(uid)) continue;
+                if (!excludedApps.some(a => a.packageName === pkg && a.uid === uid)) {
+                    excludedApps.push({ packageName: pkg, uid });
+                    added++;
+                }
+            }
+            await saveExcludedList(excludedApps);
+            // Re-render to pick up the new entries in the UI.
+            appItemMap.clear();
+            await refreshAppList();
+            toast(getString('msg_import_success', added));
+        } catch (e) {
+            toast(getString('msg_import_failed', e.message));
+        }
+    });
+    // If the user cancels the picker, fire the change event with no file
+    // so cleanup runs.
+    window.addEventListener('focus', () => setTimeout(cleanup, 500), { once: true });
+    input.click();
+}
+
 // Initial setup for the search and menu
 function initExcludePage() {
     const searchBtn = document.getElementById('search-btn');
@@ -321,6 +410,9 @@ function initExcludePage() {
         appItemMap.clear();
         refreshAppList();
     };
+
+    document.getElementById('export-exclude-list').onclick = () => exportExcludeList();
+    document.getElementById('import-exclude-list').onclick = () => importExcludeList();
 
     setupPullToRefresh(document.querySelector('#exclude-page .page-content'), async () => {
         appItemMap.clear();

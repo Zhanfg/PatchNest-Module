@@ -127,4 +127,24 @@
     <string name="patch_step_repack">Recompactar imagem boot</string>
     <string name="patch_step_flash">Flash no dispositivo</string>
     <string name="patch_step_unpatch">Desfazer patch do kernel</string>
+    <!-- Backup SHA256 -->
+    <string name="button_copy_hash">Copiar SHA256</string>
+    <string name="msg_hash_copied">SHA256 copiado</string>
+    <string name="msg_hash_copy_failed">Falha ao copiar</string>
+    <!-- Boot/kernel metadata -->
+    <string name="info_security_patch">Patch de segurança: %1</string>
+    <string name="info_os_version">Versão do SO: %1</string>
+    <string name="info_size">Tamanho: %1</string>
+    <!-- KPM filter chips -->
+    <string name="filter_all">Todos</string>
+    <string name="filter_loaded">Carregados</string>
+    <string name="filter_with_event">Com evento</string>
+    <!-- Exclude list import/export -->
+    <string name="button_export">Exportar</string>
+    <string name="button_import">Importar</string>
+    <string name="msg_export_empty">Nenhum app excluído para exportar</string>
+    <string name="msg_export_success">Exportado para %1</string>
+    <string name="msg_export_failed">Falha ao exportar</string>
+    <string name="msg_import_success">%1 apps importados</string>
+    <string name="msg_import_failed">Falha ao importar: %1</string>
 </resources>

@@ -10,7 +10,7 @@ async function getBackupList() {
     const result = await exec(`ls -l "${BACKUP_DIR}" 2>/dev/null | grep '\\.img$'`, { env: { PATH: `${modDir}/bin` } });
     if (result.errno !== 0 || !result.stdout.trim()) return [];
 
-    return result.stdout.trim().split('\n').map(line => {
+    const items = result.stdout.trim().split('\n').map(line => {
         const parts = line.trim().split(/\s+/);
         if (parts.length < 8) return null;
         const size = parseInt(parts[4]);
@@ -24,6 +24,39 @@ async function getBackupList() {
         }
         return { name, size, dateStr };
     }).filter(Boolean).reverse();
+
+    // Compute SHA256 in a single batch call. Two reasons to do this as a
+    // batch rather than per-card: (1) one shell spawn instead of N, (2) the
+    // sha256sum command is parallelizable by the kernel. If the command
+    // fails, each card shows "—" instead of a hash.
+    const hashes = await computeHashes(items.map(i => i.name));
+    items.forEach((it, idx) => { it.sha256 = hashes[idx] || ''; });
+    return items;
+}
+
+/**
+ * Run a single sha256sum over all .img files and parse "<hash>  <name>"
+ * output lines. Returns an array indexed by the input order. Failed or
+ * missing entries get "" so the caller can render a placeholder.
+ */
+async function computeHashes(names) {
+    if (names.length === 0) return [];
+    // Quote each name via escapeShell; join with spaces. The leading "+"
+    // tells sha256sum to read filenames from stdin — but we'll just
+    // expand the names directly since we control them.
+    const quoted = names.map(n => escapeShell(`${BACKUP_DIR}/${n}`)).join(' ');
+    const result = await exec(`sha256sum ${quoted} 2>/dev/null`, {
+        env: { PATH: `${modDir}/bin` },
+    });
+    if (result.errno !== 0) return names.map(() => '');
+
+    // Build a name -> hash map from the output.
+    const map = new Map();
+    result.stdout.split('\n').forEach(line => {
+        const m = line.match(/^([0-9a-f]{64})\s+\*?(.+)$/);
+        if (m) map.set(m[2], m[1]);
+    });
+    return names.map(n => map.get(`${BACKUP_DIR}/${n}`) || '');
 }
 
 function formatSize(bytes) {
@@ -56,8 +89,16 @@ async function refreshBackupList() {
                 <div class="module-card-title">${escapeHTML(backup.name)}</div>
                 <div class="module-card-subtitle">${escapeHTML(backup.dateStr)} &middot; ${formatSize(backup.size)}</div>
             </div>
+            <div class="module-card-content">
+                <div class="module-card-subtitle backup-hash">${backup.sha256
+                    ? `<span class="hash-label">SHA256</span> <code>${escapeHTML(backup.sha256)}</code>`
+                    : `<span class="hash-label">SHA256</span> <span class="hash-unknown">—</span>`}</div>
+            </div>
             <md-divider></md-divider>
             <div class="module-card-actions">
+                <md-filled-tonal-icon-button class="copy-hash-btn" title="${getString('button_copy_hash')}"${backup.sha256 ? '' : ' disabled'}>
+                    <md-icon><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960"><path d="M360-240q-33 0-56.5-23.5T280-320v-480q0-33 23.5-56.5T360-880h360q33 0 56.5 23.5T800-800v480q0 33-23.5 56.5T720-240H360Zm0-80h360v-480H360v480ZM200-80q-33 0-56.5-23.5T120-160v-560h80v560h440v80H200Zm160-240v-480 480Z"/></svg></md-icon>
+                </md-filled-tonal-icon-button>
                 <md-filled-tonal-icon-button class="save-btn" title="${getString('button_save_to_storage')}">
                     <md-icon><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960"><path d="M480-320 280-520l56-58 104 104v-326h80v326l104-104 56 58-200 200ZM240-160q-33 0-56.5-23.5T160-240v-120h80v120h480v-120h80v120q0 33-23.5 56.5T720-160H240Z"/></svg></md-icon>
                 </md-filled-tonal-icon-button>
@@ -66,6 +107,34 @@ async function refreshBackupList() {
                 </md-filled-tonal-icon-button>
             </div>
         `;
+
+        const copyBtn = card.querySelector('.copy-hash-btn');
+        if (backup.sha256) {
+            copyBtn.onclick = () => {
+                // Try the modern Clipboard API first; fall back to a
+                // hidden textarea + execCommand for older WebView builds
+                // (Kernelsu's runtime is sometimes an old WebView).
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(backup.sha256)
+                        .then(() => toast(getString('msg_hash_copied')))
+                        .catch(() => fallbackCopy(backup.sha256));
+                } else {
+                    fallbackCopy(backup.sha256);
+                }
+            };
+        }
+
+        const fallbackCopy = (text) => {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand('copy'); toast(getString('msg_hash_copied')); }
+            catch (_) { toast(getString('msg_hash_copy_failed')); }
+            document.body.removeChild(ta);
+        };
 
         card.querySelector('.save-btn').onclick = async () => {
             // Strip any directory components — backup.name must be a basename only,

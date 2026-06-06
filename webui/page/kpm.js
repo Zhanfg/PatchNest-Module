@@ -7,6 +7,7 @@ import { escapeHTML, sanitizeFilename } from '../utils.js';
 
 let allKpms = [];
 let searchQuery = '';
+let activeFilter = 'all'; // 'all' | 'loaded' | 'event'
 let clickCount = 0;
 let lastClickTime = 0;
 let redirectShown = false;
@@ -181,9 +182,23 @@ function applyFilters() {
         const item = kpmItemMap.get(module.name);
         if (!item) return;
 
-        const isVisible = (module.name || '').toLowerCase().includes(query) ||
-            (module.description || '').toLowerCase().includes(query);
+        const matchesSearch = (module.name || '').toLowerCase().includes(query) ||
+            (module.description || '').toLowerCase().includes(query) ||
+            (module.args || '').toLowerCase().includes(query);
 
+        // Filter chip logic. Each predicate is independent of the search
+        // text — the search and the chip combine with AND.
+        let matchesFilter = true;
+        if (activeFilter === 'loaded') {
+            // A module is considered "loaded" if the kpm list call returned
+            // it (which it always does in this context, so this is a
+            // placeholder for future loaded-state distinction).
+            matchesFilter = true;
+        } else if (activeFilter === 'event') {
+            matchesFilter = !!(module.event && module.event.trim());
+        }
+
+        const isVisible = matchesSearch && matchesFilter;
         item.classList.toggle('search-hidden', !isVisible);
         if (isVisible) visibleCount++;
     });
@@ -514,6 +529,16 @@ export function initKPMPage() {
     searchInput.addEventListener('input', () => {
         searchQuery = searchInput.value;
         applyFilters();
+    });
+
+    // Filter chips: clicking a chip deselects others and applies the filter.
+    const chips = document.querySelectorAll('#kpm-filter-chips md-filter-chip');
+    chips.forEach(chip => {
+        chip.addEventListener('click', () => {
+            chips.forEach(c => c.selected = (c === chip));
+            activeFilter = chip.dataset.filter || 'all';
+            applyFilters();
+        });
     });
 
     menuBtn.onclick = () => menu.show();

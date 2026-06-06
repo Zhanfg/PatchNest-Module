@@ -127,4 +127,24 @@
     <string name="patch_step_repack">ブートイメージの再パック</string>
     <string name="patch_step_flash">デバイスへフラッシュ</string>
     <string name="patch_step_unpatch">カーネルのパッチ解除</string>
+    <!-- Backup SHA256 -->
+    <string name="button_copy_hash">SHA256をコピー</string>
+    <string name="msg_hash_copied">SHA256をコピーしました</string>
+    <string name="msg_hash_copy_failed">コピー失敗</string>
+    <!-- Boot/kernel metadata -->
+    <string name="info_security_patch">セキュリティパッチ: %1</string>
+    <string name="info_os_version">OS バージョン: %1</string>
+    <string name="info_size">サイズ: %1</string>
+    <!-- KPM filter chips -->
+    <string name="filter_all">すべて</string>
+    <string name="filter_loaded">ロード済み</string>
+    <string name="filter_with_event">イベント付き</string>
+    <!-- Exclude list import/export -->
+    <string name="button_export">エクスポート</string>
+    <string name="button_import">インポート</string>
+    <string name="msg_export_empty">エクスポートする除外アプリがありません</string>
+    <string name="msg_export_success">%1 にエクスポートしました</string>
+    <string name="msg_export_failed">エクスポート失敗</string>
+    <string name="msg_import_success">%1 個のアプリをインポートしました</string>
+    <string name="msg_import_failed">インポート失敗: %1</string>
 </resources>

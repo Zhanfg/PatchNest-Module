@@ -127,4 +127,24 @@
     <string name="patch_step_repack">إعادة حزم صورة boot</string>
     <string name="patch_step_flash">الوميض إلى الجهاز</string>
     <string name="patch_step_unpatch">إلغاء ترقيع النواة</string>
+    <!-- Backup SHA256 -->
+    <string name="button_copy_hash">نسخ SHA256</string>
+    <string name="msg_hash_copied">SHA256 تم نسخه</string>
+    <string name="msg_hash_copy_failed">فشل النسخ</string>
+    <!-- Boot/kernel metadata -->
+    <string name="info_security_patch">تصحيح أمان: %1</string>
+    <string name="info_os_version">إصدار نظام التشغيل: %1</string>
+    <string name="info_size">الحجم: %1</string>
+    <!-- KPM filter chips -->
+    <string name="filter_all">الكل</string>
+    <string name="filter_loaded">محملة</string>
+    <string name="filter_with_event">مع حدث</string>
+    <!-- Exclude list import/export -->
+    <string name="button_export">تصدير</string>
+    <string name="button_import">استيراد</string>
+    <string name="msg_export_empty">لا توجد تطبيقات مستبعدة للتصدير</string>
+    <string name="msg_export_success">تم التصدير إلى %1</string>
+    <string name="msg_export_failed">فشل التصدير</string>
+    <string name="msg_import_success">تم استيراد %1 تطبيقات</string>
+    <string name="msg_import_failed">فشل الاستيراد: %1</string>
 </resources>

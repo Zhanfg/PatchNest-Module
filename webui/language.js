@@ -152,8 +152,20 @@ export async function loadTranslations() {
         const isRTL = rtlLang.includes(lang.split('-')[0]);
         const dir = isRTL ? 'rtl' : 'ltr';
         document.documentElement.setAttribute('dir', dir);
+        // Use CSS transform for the flip so any element that already has a
+        // transform (e.g. animated card) is preserved via the
+        // [data-rtl-flipped] attribute we set/unset here. Reading the
+        // computed value first would also work but costs a layout flush;
+        // instead we cache the previous flip state on the element.
         document.querySelectorAll('[flip-icon-in-rtl="true"]').forEach(el => {
-            el.style.transform = dir === 'rtl' ? 'scaleX(-1)' : 'scaleX(1)';
+            const wasFlipped = el.dataset.rtlFlipped === '1';
+            const shouldFlip = dir === 'rtl';
+            if (wasFlipped === shouldFlip) return;
+            // Re-apply the original transform with a scaleX layer on top.
+            const base = el.dataset.rtlBaseTransform || '';
+            el.dataset.rtlBaseTransform = base;
+            el.dataset.rtlFlipped = shouldFlip ? '1' : '0';
+            el.style.transform = shouldFlip ? `scaleX(-1) ${base}`.trim() : base;
         });
 
         // Generate language menu

@@ -127,4 +127,24 @@
     <string name="patch_step_repack">重新打包 boot 映像</string>
     <string name="patch_step_flash">刷入裝置</string>
     <string name="patch_step_unpatch">撤銷核心修補</string>
+    <!-- Backup SHA256 -->
+    <string name="button_copy_hash">複製 SHA256</string>
+    <string name="msg_hash_copied">SHA256 已複製到剪貼板</string>
+    <string name="msg_hash_copy_failed">複製失敗</string>
+    <!-- Boot/kernel metadata -->
+    <string name="info_security_patch">安全性修補程式: %1</string>
+    <string name="info_os_version">系統版本: %1</string>
+    <string name="info_size">大小: %1</string>
+    <!-- KPM filter chips -->
+    <string name="filter_all">全部</string>
+    <string name="filter_loaded">已載入</string>
+    <string name="filter_with_event">有事件</string>
+    <!-- Exclude list import/export -->
+    <string name="button_export">匯出</string>
+    <string name="button_import">匯入</string>
+    <string name="msg_export_empty">沒有需要匯出的排除應用</string>
+    <string name="msg_export_success">已匯出到 %1</string>
+    <string name="msg_export_failed">匯出失敗</string>
+    <string name="msg_import_success">已匯入 %1 個應用</string>
+    <string name="msg_import_failed">匯入失敗: %1</string>
 </resources>

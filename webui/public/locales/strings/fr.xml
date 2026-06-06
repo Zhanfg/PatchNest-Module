@@ -127,4 +127,24 @@
     <string name="patch_step_repack">Recompacter l'image boot</string>
     <string name="patch_step_flash">Flasher sur l'appareil</string>
     <string name="patch_step_unpatch">Annuler le patch du noyau</string>
+    <!-- Backup SHA256 -->
+    <string name="button_copy_hash">Copier SHA256</string>
+    <string name="msg_hash_copied">SHA256 copié</string>
+    <string name="msg_hash_copy_failed">Échec de la copie</string>
+    <!-- Boot/kernel metadata -->
+    <string name="info_security_patch">Correctif de sécurité : %1</string>
+    <string name="info_os_version">Version OS : %1</string>
+    <string name="info_size">Taille : %1</string>
+    <!-- KPM filter chips -->
+    <string name="filter_all">Tous</string>
+    <string name="filter_loaded">Chargés</string>
+    <string name="filter_with_event">Avec événement</string>
+    <!-- Exclude list import/export -->
+    <string name="button_export">Exporter</string>
+    <string name="button_import">Importer</string>
+    <string name="msg_export_empty">Aucune appli exclue à exporter</string>
+    <string name="msg_export_success">Exporté vers %1</string>
+    <string name="msg_export_failed">Échec de l'exportation</string>
+    <string name="msg_import_success">%1 applis importées</string>
+    <string name="msg_import_failed">Échec de l'importation : %1</string>
 </resources>

@@ -127,4 +127,24 @@
     <string name="patch_step_repack">Boot görüntüsünü yeniden paketle</string>
     <string name="patch_step_flash">Cihaza flaşla</string>
     <string name="patch_step_unpatch">Kernel yamasını geri al</string>
+    <!-- Backup SHA256 -->
+    <string name="button_copy_hash">SHA256 kopyala</string>
+    <string name="msg_hash_copied">SHA256 kopyalandı</string>
+    <string name="msg_hash_copy_failed">Kopyalama başarısız</string>
+    <!-- Boot/kernel metadata -->
+    <string name="info_security_patch">Güvenlik yaması: %1</string>
+    <string name="info_os_version">İşletim sistemi sürümü: %1</string>
+    <string name="info_size">Boyut: %1</string>
+    <!-- KPM filter chips -->
+    <string name="filter_all">Tümü</string>
+    <string name="filter_loaded">Yüklü</string>
+    <string name="filter_with_event">Etkinlikli</string>
+    <!-- Exclude list import/export -->
+    <string name="button_export">Dışa aktar</string>
+    <string name="button_import">İçe aktar</string>
+    <string name="msg_export_empty">Dışa aktarılacak hariç tutulan uygulama yok</string>
+    <string name="msg_export_success">%1 yoluna aktarıldı</string>
+    <string name="msg_export_failed">Dışa aktarma başarısız</string>
+    <string name="msg_import_success">%1 uygulama içe aktarıldı</string>
+    <string name="msg_import_failed">İçe aktarma başarısız: %1</string>
 </resources>

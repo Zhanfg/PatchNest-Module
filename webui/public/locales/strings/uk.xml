@@ -127,4 +127,24 @@
     <string name="patch_step_repack">Перезібрати образ boot</string>
     <string name="patch_step_flash">Прошити на пристрій</string>
     <string name="patch_step_unpatch">Відкотити патч ядра</string>
+    <!-- Backup SHA256 -->
+    <string name="button_copy_hash">Копіювати SHA256</string>
+    <string name="msg_hash_copied">SHA256 скопійовано</string>
+    <string name="msg_hash_copy_failed">Помилка копіювання</string>
+    <!-- Boot/kernel metadata -->
+    <string name="info_security_patch">Патч безпеки: %1</string>
+    <string name="info_os_version">Версія ОС: %1</string>
+    <string name="info_size">Розмір: %1</string>
+    <!-- KPM filter chips -->
+    <string name="filter_all">Усі</string>
+    <string name="filter_loaded">Завантажені</string>
+    <string name="filter_with_event">З подією</string>
+    <!-- Exclude list import/export -->
+    <string name="button_export">Експорт</string>
+    <string name="button_import">Імпорт</string>
+    <string name="msg_export_empty">Немає виключених додатків для експорту</string>
+    <string name="msg_export_success">Експортовано до %1</string>
+    <string name="msg_export_failed">Помилка експорту</string>
+    <string name="msg_import_success">%1 додатків імпортовано</string>
+    <string name="msg_import_failed">Помилка імпорту: %1</string>
 </resources>

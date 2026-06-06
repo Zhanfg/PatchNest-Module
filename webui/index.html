@@ -80,6 +80,8 @@
                     </md-icon-button>
                     <md-menu id="exclude-menu" anchor="exclude-menu-btn">
                         <md-menu-item id="refresh-app-list" data-i18n="button_refresh">Refresh</md-menu-item>
+                        <md-menu-item id="export-exclude-list" data-i18n="button_export">Export</md-menu-item>
+                        <md-menu-item id="import-exclude-list" data-i18n="button_import">Import</md-menu-item>
                         <md-menu-item>
                             <label slot="headline" for="show-system-app" data-i18n="label_show_system_app">Show system app</label>
                             <md-checkbox slot="end" id="show-system-app"></md-checkbox>
@@ -140,6 +142,11 @@
             <!-- KPM -->
             <div id="kpm-page" class="page">
                 <div class="page-content">
+                    <div class="filter-chips content-padding" id="kpm-filter-chips">
+                        <md-filter-chip selected data-filter="all" data-i18n="filter_all">All</md-filter-chip>
+                        <md-filter-chip data-filter="loaded" data-i18n="filter_loaded">Loaded</md-filter-chip>
+                        <md-filter-chip data-filter="event" data-i18n="filter_with_event">With event</md-filter-chip>
+                    </div>
                     <div class="module-list content-padding fab-padding" id="kpm-list"></div>
                     <div class="empty-list" id="kpm-empty-msg" data-i18n="msg_no_module_loaded">No module loaded</div>
                 </div>
@@ -270,10 +277,12 @@
                         <div class="card-title" slot="headline">bootimg</div>
                         <div id="bootimg-slot"></div>
                         <div id="bootimg-device"></div>
+                        <div id="bootimg-size"></div>
                     </div>
                     <div class="card content-padding animated animate-hidden" id="kernel">
                         <div class="card-title" slot="headline" data-i18n="title_kernel">Kernel</div>
                         <div id="kernel-info"></div>
+                        <div id="kernel-details"></div>
                     </div>
                     <div class="switch-card content-padding patch-only">
                         <label>

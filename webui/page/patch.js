@@ -15,6 +15,13 @@ function uInt2String(ver) {
     return `${major}.${minor}.${patch}`;
 }
 
+function formatSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+}
+
 function parseIni(str) {
     const result = {};
     let currentSection = null;
@@ -128,10 +135,38 @@ async function parseBootimg() {
     if (ini.kernel) {
         kimgInfo.banner = ini.kernel.banner;
         kimgInfo.patched = ini.kernel.patched === 'true';
+        // Extra metadata fields (may be absent on older kptools builds)
+        kimgInfo.security_patch = ini.kernel.security_patch || '';
+        kimgInfo.os_version = ini.kernel.os_version || '';
 
         // Kernel info card
         document.getElementById('kernel-info').textContent = kimgInfo.banner;
         document.getElementById('kernel').classList.remove('animate-hidden');
+
+        // Show security patch + OS version as a secondary detail line.
+        const kernelDetails = document.getElementById('kernel-details');
+        if (kernelDetails) {
+            const parts = [];
+            if (kimgInfo.security_patch) parts.push(getString('info_security_patch', kimgInfo.security_patch));
+            if (kimgInfo.os_version) parts.push(getString('info_os_version', kimgInfo.os_version));
+            kernelDetails.textContent = parts.join(' | ');
+        }
+
+        // Boot image size: read the unpacked kernel file if we're in tmp.
+        if (modDir) {
+            try {
+                const sizeResult = await exec(`wc -c < ${modDir}/tmp/kernel.ori 2>/dev/null || wc -c < ${modDir}/tmp/kernel 2>/dev/null`, {
+                    env: { PATH: `${modDir}/bin` },
+                });
+                const sizeEl = document.getElementById('bootimg-size');
+                if (sizeResult && sizeResult.stdout) {
+                    const bytes = parseInt(sizeResult.stdout.trim());
+                    if (!isNaN(bytes) && sizeEl) {
+                        sizeEl.textContent = getString('info_size', formatSize(bytes));
+                    }
+                }
+            } catch (_) {}
+        }
 
         if (kimgInfo.patched && ini.kpimg) {
             // Parse extras

@@ -127,4 +127,24 @@
     <string name="patch_step_repack">Пересобрать образ boot</string>
     <string name="patch_step_flash">Прошить на устройство</string>
     <string name="patch_step_unpatch">Откатить патч ядра</string>
+    <!-- Backup SHA256 -->
+    <string name="button_copy_hash">Копировать SHA256</string>
+    <string name="msg_hash_copied">SHA256 скопирован</string>
+    <string name="msg_hash_copy_failed">Ошибка копирования</string>
+    <!-- Boot/kernel metadata -->
+    <string name="info_security_patch">Патч безопасности: %1</string>
+    <string name="info_os_version">Версия ОС: %1</string>
+    <string name="info_size">Размер: %1</string>
+    <!-- KPM filter chips -->
+    <string name="filter_all">Все</string>
+    <string name="filter_loaded">Загружены</string>
+    <string name="filter_with_event">С событием</string>
+    <!-- Exclude list import/export -->
+    <string name="button_export">Экспорт</string>
+    <string name="button_import">Импорт</string>
+    <string name="msg_export_empty">Нет исключённых приложений для экспорта</string>
+    <string name="msg_export_success">Экспортировано в %1</string>
+    <string name="msg_export_failed">Ошибка экспорта</string>
+    <string name="msg_import_success">%1 приложений импортировано</string>
+    <string name="msg_import_failed">Ошибка импорта: %1</string>
 </resources>

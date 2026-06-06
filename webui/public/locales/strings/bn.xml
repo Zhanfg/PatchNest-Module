@@ -127,4 +127,24 @@
     <string name="patch_step_repack">boot ইমেজ পুনঃপ্যাক</string>
     <string name="patch_step_flash">ডিভাইসে ফ্ল্যাশ</string>
     <string name="patch_step_unpatch">কার্নেল আনপ্যাচ</string>
+    <!-- Backup SHA256 -->
+    <string name="button_copy_hash">SHA256 কপি করুন</string>
+    <string name="msg_hash_copied">SHA256 কপি করা হয়েছে</string>
+    <string name="msg_hash_copy_failed">কপি ব্যর্থ</string>
+    <!-- Boot/kernel metadata -->
+    <string name="info_security_patch">নিরাপত্তা প্যাচ: %1</string>
+    <string name="info_os_version">OS সংস্করণ: %1</string>
+    <string name="info_size">আকার: %1</string>
+    <!-- KPM filter chips -->
+    <string name="filter_all">সব</string>
+    <string name="filter_loaded">লোড করা</string>
+    <string name="filter_with_event">ইভেন্ট সহ</string>
+    <!-- Exclude list import/export -->
+    <string name="button_export">রপ্তানি</string>
+    <string name="button_import">আমদানি</string>
+    <string name="msg_export_empty">রপ্তানির জন্য কোনো বাতিল অ্যাপ নেই</string>
+    <string name="msg_export_success">%1-তে রপ্তানি হয়েছে</string>
+    <string name="msg_export_failed">রপ্তানি ব্যর্থ</string>
+    <string name="msg_import_success">%1 অ্যাপ আমদানি হয়েছে</string>
+    <string name="msg_import_failed">আমদানি ব্যর্থ: %1</string>
 </resources>
