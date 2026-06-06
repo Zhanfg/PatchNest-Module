@@ -91,8 +91,15 @@ log "Installing KPM: $MOD_NAME ($MOD_ID) v$MOD_VERSION"
 mkdir -p "$KPM_DIR" "$KPM_ZIP_DIR" "$KPM_EVENT_DIR"
 
 # Check for source files (.c)
-SRC_FILES=$(find "$TMPDIR" -name "*.c" -type f 2>/dev/null)
-KPM_FILES=$(find "$TMPDIR" -type f \( -name "*.kpm" -o -name "*.ko" -o -name "*.o" \) 2>/dev/null | grep -v '__MACOSX')
+# P1-Cluster B fix: explicitly skip macOS resource forks (._*) and
+# .DS_Store which unzip-on-macOS leaves behind. Otherwise `head -1`
+# below can pick up a metadata file and the script silently reports
+# "no .kpm found" with no error message.
+SRC_FILES=$(find "$TMPDIR" -type f -name "*.c" \
+    ! -name '._*' ! -name '.DS_Store' 2>/dev/null)
+KPM_FILES=$(find "$TMPDIR" -type f \
+    \( -name "*.kpm" -o -name "*.ko" -o -name "*.o" \) \
+    ! -name '._*' ! -name '.DS_Store' 2>/dev/null)
 
 if [ -n "$KPM_FILES" ]; then
     # Binary module: copy .kpm/.ko/.o directly

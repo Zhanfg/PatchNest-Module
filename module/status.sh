@@ -75,7 +75,15 @@ if kpatch hello >/dev/null 2>&1; then
     [ -z "$KPM_COUNT" ] && KPM_COUNT=0
 
     REHOOK_MODE="$(kpatch rehook_status 2>/dev/null | awk '{print $NF}')"
-    [ -z "$REHOOK_MODE" ] && REHOOK_MODE="enabled"
+    # P1-Cluster B fix: normalize the rehook mode value. The command can
+    # return "enabled", "disabled", or an unexpected value if kpatch's
+    # output format changes.  Previously the default was "enabled" which
+    # made an unparseable output look like rehook was on — misleading to
+    # the user.  We now default to "unknown" and only accept known values.
+    case "$REHOOK_MODE" in
+        enabled|disabled) ;;
+        *) REHOOK_MODE="unknown";;
+    esac
 
     string="$active | kpmodule: $KPM_COUNT | rehook: $REHOOK_MODE | $ROOT_MGR"
 fi

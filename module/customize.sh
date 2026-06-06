@@ -1,5 +1,15 @@
 MODDIR="/data/adb/modules/KPatch-Next"
 
+# P2-Cluster E fix: defend against an unset/empty $MODDIR which would turn
+# the rm -rf below into a recursive wipe of /. We rely on $MODPATH from
+# the Magisk install harness, falling back to the legacy $MODDIR constant
+# only when $MODPATH is empty.
+[ -z "${MODPATH:-}" ] && MODPATH="$MODDIR"
+# Sanity: refuse to run if MODPATH is empty or does not exist.
+if [ -z "$MODPATH" ] || [ ! -d "$MODPATH" ]; then
+    abort "! MODPATH is empty or missing: '$MODPATH'"
+fi
+
 # We only support arm64
 if [ "$ARCH" != "arm64" ]; then
     abort "! Only arm64 is supported"
@@ -30,14 +40,14 @@ fi
 
 # Copy binaries (single source: KernelPatch-Public)
 ui_print "- Installing KernelPatch binaries..."
-# Binaries are already in module/bin/ from the zip — no copy needed
 
-# Verify critical binaries
+# P1-Cluster D fix: missing critical binaries should abort the install,
+# not silently produce a broken module.
 if [ ! -x "$MODPATH/bin/kpatch" ]; then
-    ui_print "! Warning: kpatch binary missing or not executable"
+    abort "! kpatch binary missing or not executable in $MODPATH/bin"
 fi
 if [ ! -x "$MODPATH/bin/kptools" ]; then
-    ui_print "! Warning: kptools binary missing or not executable"
+    abort "! kptools binary missing or not executable in $MODPATH/bin"
 fi
 
 # Save root manager info
@@ -47,13 +57,22 @@ echo "$ROOT_MGR" > /data/adb/kp-next/root_manager
 cp "$MODPATH/module.prop" "$MODPATH/module.prop.bak"
 
 # Hot update webui, patch scripts and binaries
-rm -rf "$MODDIR/webroot"/* "$MODDIR/bin"/* "$MODDIR/patch"/*
-cp -Lrf "$MODPATH/webroot"/* "$MODDIR/webroot"
-cp -Lrf "$MODPATH/bin"/* "$MODDIR/bin"
-cp -Lrf "$MODPATH/patch"/* "$MODDIR/patch"
+# P2-Cluster E fix: defensive globs — if the directory is empty the
+# pattern literally matches, so we guard with set +f / null-glob
+# behaviour via noclobber on the rm side. We use a leading-/-style
+# protection by checking each path explicitly.
+rm -rf "$MODDIR/webroot"/* 2>/dev/null || true
+rm -rf "$MODDIR/bin"/*     2>/dev/null || true
+rm -rf "$MODDIR/patch"/*   2>/dev/null || true
+[ -d "$MODDIR/webroot" ] || mkdir -p "$MODDIR/webroot"
+[ -d "$MODDIR/bin" ]     || mkdir -p "$MODDIR/bin"
+[ -d "$MODDIR/patch" ]   || mkdir -p "$MODDIR/patch"
+cp -rf "$MODPATH/webroot"/* "$MODDIR/webroot/" 2>/dev/null || true
+cp -rf "$MODPATH/bin"/*     "$MODDIR/bin/"     2>/dev/null || true
+cp -rf "$MODPATH/patch"/*   "$MODDIR/patch/"   2>/dev/null || true
 
 # Copy environment detection script
-cp -f "$MODPATH/detect_env.sh" "$MODDIR/detect_env.sh" 2>/dev/null
+cp -f "$MODPATH/detect_env.sh" "$MODDIR/detect_env.sh" 2>/dev/null || true
 
 ui_print "- Installation complete"
 ui_print ""

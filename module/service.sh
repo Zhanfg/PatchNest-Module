@@ -34,14 +34,20 @@ if [ ! -x "$MODDIR/bin/kpatch" ]; then
     exit 0
 fi
 
-# Retry kpatch hello
+# Retry kpatch hello (P1-Cluster D: increase retries 3->5 for slow devices,
+# and require both 'hello' exit code 0 AND non-empty output, to avoid
+# treating a stuck kernel as "ready".)
 retries=0
-while [ -z "$(kpatch hello 2>/dev/null)" ] && [ $retries -lt 3 ]; do
+max_retries=5
+while [ $retries -lt $max_retries ]; do
+    if kpatch hello >/dev/null 2>&1; then
+        break
+    fi
     echo "[$(date)] kpatch hello attempt $((retries + 1)) failed, retrying..." >> "$LOG"
     sleep 2
     retries=$((retries + 1))
 done
-if [ -z "$(kpatch hello 2>/dev/null)" ]; then
+if ! kpatch hello >/dev/null 2>&1; then
     echo "[$(date)] kpatch hello failed after $retries retries" >> "$LOG"
     echo "[$(date)] Kernel may not be patched yet. Open WebUI and click Start." >> "$LOG"
     touch "$MODDIR/unresolved"

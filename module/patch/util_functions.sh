@@ -20,7 +20,11 @@ toupper() {
 
 grep_cmdline() {
   local REGEX="s/^$1=//p"
-  { echo $(cat /proc/cmdline)$(sed -e 's/[^"]//g' -e 's/""//g' /proc/cmdline) | xargs -n 1; \
+  # P1-Cluster D fix: the previous echo $(cat /proc/cmdline) collapses
+  # newlines (good for the cmdline file) but, on devices that ship a
+  # multi-line bootconfig, the cat-then-echo-then-xargs could yield
+  # duplicate matches. Use a single tr to flatten, then split.
+  { tr '\n' ' ' < /proc/cmdline | xargs -n 1; \
     sed -e 's/ = /=/g' -e 's/, /,/g' -e 's/"//g' /proc/bootconfig; \
   } 2>/dev/null | sed -n "$REGEX"
 }
@@ -378,7 +382,16 @@ mount_partitions() {
 
   LEGACYSAR=false
   if $BOOTMODE; then
-    grep ' / ' /proc/mounts | grep -q '/dev/root' && LEGACYSAR=true
+    # P1-Cluster D fix: also detect LEGACYSAR via cmdline hints
+    # (androidboot.super_partition absent + a rootfs entry). The previous
+    # '/dev/root' heuristic mis-fired on some GKI 2.0 devices that show
+    # /dev/root in /proc/mounts but actually use dynamic partitions.
+    if grep -q 'androidboot.super_partition' /proc/cmdline || \
+       [ -n "$(find_block super)" ]; then
+      LEGACYSAR=false
+    elif grep ' / ' /proc/mounts | grep -q '/dev/root'; then
+      LEGACYSAR=true
+    fi
   else
     # Recovery mode, assume devices that don't use dynamic partitions are legacy SAR
     local IS_DYNAMIC=false

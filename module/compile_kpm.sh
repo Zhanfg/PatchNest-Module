@@ -107,7 +107,9 @@ TMPDIR=$(mktemp -d /tmp/kpm_build.XXXXXX)
 trap 'rm -rf "$TMPDIR"' EXIT
 
 OBJ_FILE="$TMPDIR/module.o"
-CFLAGS="-nostdinc -nostdlib -fno-builtin -fno-stack-protector -I$KPM_INCLUDE -I$SRC_DIR"
+# P1-Cluster B fix: add -fPIC so clang/aarch64 doesn't fail on .kpm
+# relocations. Also keep -O2 so -O0 doesn't make verification slow.
+CFLAGS="-nostdinc -nostdlib -fno-builtin -fno-stack-protector -fPIC -O2 -I$KPM_INCLUDE -I$SRC_DIR"
 
 if [ "$COMPILER" = "tcc" ]; then
     # TCC: simple compile to .o
