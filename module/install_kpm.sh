@@ -48,9 +48,27 @@ ZIP_FILE="$1"
 # could let a separate process (e.g. a malicious pre-existing .kpm.sig
 # check) confuse the manifest parser. The whitelist allows KPM zip
 # filenames that look like the canonical KPM naming we generate.
+#
+# Pattern order matters in POSIX case-glob: each branch is checked
+# top-to-bottom, so put the most-specific rejections first to avoid
+# shellcheck SC2221/SC2222 warnings about a "later" branch being
+# unreachable.
 case "$ZIP_FILE" in
-    ""|*[!A-Za-z0-9._/+@%=-]*|/.*|*../*|*/../*|*/./*)
-        echo "! install_kpm.sh: refusing to install with unsafe zip filename: '$ZIP_FILE'" >&2
+    # Reject empty or absolute paths outright.
+    "" | /*)
+        echo "! install_kpm.sh: refusing to install with empty or absolute path: '$ZIP_FILE'" >&2
+        exit 2
+        ;;
+    # Reject path-traversal sequences anywhere in the path.
+    *..* | */./*)
+        echo "! install_kpm.sh: refusing to install with path-traversal: '$ZIP_FILE'" >&2
+        exit 2
+        ;;
+    # Reject any character that isn't in our safe set. This must come
+    # last because it matches the broadest class; anything that
+    # reached here was already accepted by the two checks above.
+    *[!A-Za-z0-9._/+@%=-]*)
+        echo "! install_kpm.sh: refusing to install with unsafe characters in zip filename: '$ZIP_FILE'" >&2
         exit 2
         ;;
 esac
