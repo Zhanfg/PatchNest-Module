@@ -316,6 +316,12 @@ jobs:
     steps:
     - uses: actions/checkout@v6
       with: { fetch-depth: 1 }
+    # P0-4 fix: build job also needs NDK for kp-safemode cross-compile
+    # AND for the anti-detect KPM suite (module/kpms/*.c -> *.kpm).
+    - name: Setup Android NDK
+      uses: nttld/setup-ndk@v1
+      with:
+        ndk-version: r26d
 
     - name: Load versions
       run: grep -v '^#' version.properties | sed -e 's/ *= */=/g' -e 's/"//g' >> $GITHUB_ENV
