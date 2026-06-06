@@ -2,6 +2,7 @@
 // This breaks circular dependency with index.js
 import { exec, toast } from 'kernelsu-alt';
 import { getString } from './language.js';
+import { sanitizeUrl } from './utils.js';
 
 export const modDir = '/data/adb/modules/KPatch-Next';
 export const persistDir = '/data/adb/kp-next';
@@ -18,13 +19,20 @@ export function escapeShell(cmd) {
 }
 
 export function linkRedirect(link) {
-    toast(getString('msg_redirecting_to', link));
+    // P0-fix (ultracode-audit-2026-06-06): `link` can come from any
+    // user-clickable text in the WebUI. Sanitizing it through sanitizeUrl
+    // blocks any non-http(s) protocol (e.g. file:, javascript:, custom
+    // URI schemes that kernelsu-alt exec may surface to `am start`),
+    // and escapeShell() keeps the URL a single token in the exec
+    // command so a crafted link like 'foo;rm -rf /' cannot break out.
+    const safeLink = sanitizeUrl(link) || link;
+    toast(getString('msg_redirecting_to', safeLink));
     setTimeout(() => {
-        exec(`am start -a android.intent.action.VIEW -d ${link}`)
+        exec(`am start -a android.intent.action.VIEW -d ${escapeShell(safeLink)}`)
             .then(({ errno }) => {
                 if (errno !== 0) {
                     toast(getString('msg_failed_open_link'));
-                    window.open(link, '_blank');
+                    window.open(safeLink, '_blank');
                 }
             });
     }, 100);

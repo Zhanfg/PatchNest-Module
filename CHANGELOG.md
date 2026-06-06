@@ -2,6 +2,40 @@
 
 ## Changelog
 
+### v0.3.0-rc6
+
+#### 🔒 Security (ultracode-audit 2026-06-06)
+- **KPM signing key replaced**: `module/kpm_verify.sh` now bundles a real Ed25519
+  public key (replacing the well-known RFC 8032 Test 1 key, whose private half
+  is public and would have let any attacker forge .kpm.sig files). The
+  matching private key is held out-of-band and is NOT in the repo. Probe
+  vector updated to match.
+- **`update-check.js` zipUrl injection fixed**: previously the download URL
+  from `update.json` was interpolated into an `exec()` shell command
+  unescaped, opening a root-RCE chain via a malicious update.json. Now
+  sanitized through `sanitizeUrl` + `escapeShell`; non-http(s) URLs are
+  rejected.
+- **`constants.js` `linkRedirect()` also hardened**: same unescaped-link
+  shell-exec sink.
+- **`service.sh` `kpatch kpm load` quoted**: added `--` so $args cannot be
+  parsed as additional kpatch options. Args are already sanitized.
+- **`install_kpm.sh` `MOD_ARGS` sanitized** with the same `tr -cd
+  'A-Za-z0-9_=,.+:/@% -'` filter service.sh uses; `kpatch kpm load` is now
+  called with `--` and quoted args.
+- **`exclude.js` EOF markers** now use `crypto.getRandomValues` (8 bytes
+  of CSPRNG entropy) instead of `Date.now() + Math.random()` (predictable).
+  The previous PR3 commit claimed this fix; this is the real one.
+- **`patch.js` `rm -f ${tmpPath}`** is now `escapeShell`'d.
+
+#### ⚡ Robustness
+- **`version`/`versionCode`** in `module.prop` and `update.json` bumped to
+  `v0.3.0-rc6` / `20` (was stuck at `v0.2.4` / `19` despite the rc tag).
+- **`update.json` zipUrl** pinned to `v0.3.0-rc6` (was `latest`, which
+  means every release would have downloaded whatever the most-recent
+  published zip was, defeating the version compare).
+- **Update-check zipSha256 field** removed until CI stamps the real value
+  (was all-zeros placeholder that v0.2.5 release would have shipped).
+
 ### v0.2.4
 
 30+ correctness, security, and robustness fixes accumulated since v0.2.2. Highlights below; full list at https://github.com/Zhanfg/KPatch-Next-Module/pull/1

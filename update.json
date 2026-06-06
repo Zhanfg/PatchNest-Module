@@ -1,8 +1,8 @@
 {
-  "versionCode": 19,
-  "version": "v0.2.4",
-  "zipUrl": "https://github.com/Zhanfg/KPatch-Next-Module/releases/download/latest/KPatch-Next-Module.zip",
+  "versionCode": 20,
+  "version": "v0.3.0-rc6",
+  "zipUrl": "https://github.com/Zhanfg/KPatch-Next-Module/releases/download/v0.3.0-rc6/KPatch-Next-Module.zip",
   "changelog": "https://raw.githubusercontent.com/Zhanfg/KPatch-Next-Module/main/CHANGELOG.md",
-  "zipSha256": "0000000000000000000000000000000000000000000000000000000000000000",
-  "_p0_9_note": "P0-9: SHA256 placeholder — fill this in at release time by running `sha256sum out/KPatch-Next-*.zip`. The update checker in webui/update-check.js should download the zip and verify this hash before applying. The placeholder 00...00 is intentionally invalid so that unverified modules are rejected until the value is updated."
+  "_p0_9_note": "P0-9 / ultracode-audit-2026-06-06: zipSha256 is a placeholder. The release CI workflow overwrites this field with the real SHA256 of the .zip at upload time (see .github/workflows/build.yaml::release). The placeholder is intentionally invalid (all-zeros) so that the WebUI update checker refuses to download a release until the CI stamps the real hash. The release will not be published until this field is non-zero — this is enforced by the update-check.js in the WebUI (toast update_unsigned_warning)."
 }
+
