@@ -8,6 +8,8 @@ import fallbackIcon from '../icon.png';
 let allApps = [];
 let showSystemApp = false;
 let searchQuery = '';
+const PROFILES_KEY = 'kp-next_exclude_profiles';
+const ACTIVE_PROFILE_KEY = 'kp-next_exclude_active_profile';
 
 const iconObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
@@ -419,8 +421,166 @@ function initExcludePage() {
         await refreshAppList();
     });
 
+    // Profile management.
+    const profileMenu = document.getElementById('exclude-profile-menu');
+    if (profileMenu) {
+        document.getElementById('save-profile-btn')?.addEventListener('click', openSaveProfileDialog);
+        document.getElementById('load-profile-btn')?.addEventListener('click', openLoadProfileDialog);
+    }
+
     // init render
     refreshAppList();
+}
+
+/* ── Exclude profiles ──────────────────────────────────────────────
+ * Named snapshots of the current exclude list. Useful when a user
+ * wants a "test" config and a "production" config and can switch
+ * between them without manually toggling each app. Stored in
+ * localStorage as {name: [{pkg, uid}, ...]}.
+ */
+
+function getProfiles() {
+    try {
+        const raw = localStorage.getItem(PROFILES_KEY);
+        return raw ? JSON.parse(raw) : {};
+    } catch (_) { return {}; }
+}
+function saveProfiles(p) {
+    localStorage.setItem(PROFILES_KEY, JSON.stringify(p));
+}
+
+/**
+ * Open a dialog to save the current exclude list under a user-chosen name.
+ * Reuses the existing control-dialog pattern (clone-and-replace for the
+ * confirm button).
+ */
+function openSaveProfileDialog() {
+    const dialog = document.getElementById('control-dialog');
+    if (!dialog) return;
+    const title = dialog.querySelector('[slot=headline]');
+    const label = dialog.querySelector('[slot=content] > div');
+    const field = dialog.querySelector('md-outlined-text-field');
+    const confirmBtn = dialog.querySelector('.confirm');
+    const cancelBtn = dialog.querySelector('.cancel');
+
+    // Temporarily repurpose the dialog.
+    const origTitle = title?.textContent;
+    const origLabel = label?.textContent;
+    if (title) title.textContent = getString('title_save_profile');
+    if (label) label.textContent = getString('label_profile_name');
+    if (field) { field.value = ''; field.disabled = false; }
+
+    // Wire confirm.
+    const origConfirm = confirmBtn.cloneNode(true);
+    confirmBtn.parentNode.replaceChild(origConfirm, confirmBtn);
+    origConfirm.disabled = false;
+    origConfirm.onclick = async () => {
+        const name = field.value.trim();
+        if (!name) return;
+        const profiles = getProfiles();
+        profiles[name] = excludedApps.map(a => ({ packageName: a.packageName, uid: a.uid }));
+        saveProfiles(profiles);
+        localStorage.setItem(ACTIVE_PROFILE_KEY, name);
+        toast(getString('msg_profile_saved', name));
+        dialog.close();
+    };
+    cancelBtn.onclick = () => dialog.close();
+    dialog.show();
+    dialog.addEventListener('close', () => {
+        // Restore original content.
+        if (title) title.textContent = origTitle;
+        if (label) label.textContent = origLabel;
+    }, { once: true });
+}
+
+/**
+ * Open a dialog to load a saved profile. Shows a list of profile
+ * names; selecting one applies it.
+ */
+function openLoadProfileDialog() {
+    const profiles = getProfiles();
+    const names = Object.keys(profiles);
+    if (names.length === 0) {
+        toast(getString('msg_no_profiles'));
+        return;
+    }
+    const dialog = document.getElementById('control-dialog');
+    if (!dialog) return;
+    const title = dialog.querySelector('[slot=headline]');
+    const contentDiv = dialog.querySelector('[slot=content] > div');
+    const field = dialog.querySelector('md-outlined-text-field');
+    const confirmBtn = dialog.querySelector('.confirm');
+    const cancelBtn = dialog.querySelector('.cancel');
+
+    const origTitle = title?.textContent;
+    const origLabel = contentDiv?.textContent;
+    if (title) title.textContent = getString('title_load_profile');
+    if (contentDiv) contentDiv.textContent = getString('label_select_profile');
+
+    // Build a selection list from the profile names.
+    if (field) {
+        field.style.display = 'none';
+        // We'll build a list dynamically into the content area.
+    }
+    const content = dialog.querySelector('[slot=content]');
+    const list = document.createElement('div');
+    list.className = 'profile-list';
+    names.forEach(name => {
+        const row = document.createElement('div');
+        row.className = 'profile-row';
+        const count = profiles[name]?.length || 0;
+        row.innerHTML = `
+            <span class="profile-name">${escapeHTML(name)}</span>
+            <span class="profile-count">${getString('profile_count', count)}</span>
+            <md-icon-button class="profile-delete-btn">
+                <md-icon><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960"><path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z"/></svg></md-icon>
+            </md-icon-button>
+        `;
+        row.querySelector('.profile-name').onclick = async () => {
+            // Apply this profile.
+            excludedApps = (profiles[name] || []).map(a => ({ packageName: a.packageName, uid: a.uid }));
+            localStorage.setItem(ACTIVE_PROFILE_KEY, name);
+            await saveExcludedList(excludedApps);
+            // Sync all toggle switches.
+            const exKeys = new Set(excludedApps.map(a => `${a.packageName}:${a.uid}`));
+            document.querySelectorAll('#app-list .app-switch').forEach(toggle => {
+                const item = toggle.closest('.app-item') || toggle.closest('[class*=app-item]');
+                // Nothing to sync here because the page will re-render.
+            });
+            appItemMap.clear();
+            await refreshAppList();
+            toast(getString('msg_profile_loaded', name));
+            dialog.close();
+        };
+        row.querySelector('.profile-delete-btn').onclick = (e) => {
+            e.stopPropagation();
+            const p = getProfiles();
+            delete p[name];
+            saveProfiles(p);
+            if (localStorage.getItem(ACTIVE_PROFILE_KEY) === name) {
+                localStorage.removeItem(ACTIVE_PROFILE_KEY);
+            }
+            row.remove();
+            if (Object.keys(p).length === 0) dialog.close();
+        };
+        list.appendChild(row);
+    });
+    // Replace the field with the list.
+    if (field) field.style.display = 'none';
+    // Insert list after the content div (before the dialog actions).
+    contentDiv?.after?.(list) ?? content?.appendChild(list);
+
+    const origConfirm = confirmBtn.cloneNode(true);
+    confirmBtn.parentNode.replaceChild(origConfirm, confirmBtn);
+    origConfirm.disabled = true; // Profile is selected via row click.
+    cancelBtn.onclick = () => dialog.close();
+    dialog.show();
+    dialog.addEventListener('close', () => {
+        if (title) title.textContent = origTitle;
+        if (contentDiv) contentDiv.textContent = origLabel;
+        if (field) field.style.display = '';
+        list.remove();
+    }, { once: true });
 }
 
 export { refreshAppList, initExcludePage };

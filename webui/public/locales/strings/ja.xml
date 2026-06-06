@@ -169,4 +169,24 @@
     <string name="repo_main">メイン</string>
     <string name="repo_more">他</string>
     <string name="repo_placeholder_name">表示名</string>
+    <!-- Backup purge -->
+    <string name="title_purge_backups">古いバックアップを削除</string>
+    <string name="label_keep_count">最新のバックアップを残す:</string>
+    <string name="button_purge">削除</string>
+    <string name="button_purge_old">古いバックアップを削除</string>
+    <string name="purge_none_to_delete">削除対象はありません — 保持件数が現在のすべてのバックアップをカバーしています。</string>
+    <string name="purge_will_delete">%1 件の古いバックアップを削除します。</string>
+    <string name="msg_purged">%1 件の古いバックアップを削除しました</string>
+    <!-- Exclude profiles -->
+    <string name="title_profiles">プロファイル</string>
+    <string name="title_save_profile">プロファイルを保存</string>
+    <string name="title_load_profile">プロファイルを読み込む</string>
+    <string name="label_profile_name">プロファイル名:</string>
+    <string name="label_select_profile">適用するプロファイルを選択:</string>
+    <string name="button_save_profile">現在をプロファイルとして保存</string>
+    <string name="button_load_profile">プロファイルを読み込む</string>
+    <string name="profile_count">%1 個のアプリ</string>
+    <string name="msg_no_profiles">保存されたプロファイルはありません</string>
+    <string name="msg_profile_saved">プロファイル「%1」を保存しました</string>
+    <string name="msg_profile_loaded">プロファイル「%1」を適用しました</string>
 </resources>

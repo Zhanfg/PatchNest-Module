@@ -169,4 +169,24 @@
     <string name="repo_main">Haupt</string>
     <string name="repo_more">weitere</string>
     <string name="repo_placeholder_name">Anzeigename</string>
+    <!-- Backup purge -->
+    <string name="title_purge_backups">Alte Backups löschen</string>
+    <string name="label_keep_count">Neueste Backups behalten:</string>
+    <string name="button_purge">Löschen</string>
+    <string name="button_purge_old">Alte Backups aufräumen</string>
+    <string name="purge_none_to_delete">Nichts zu löschen — Ihr Beibehaltungsbedarf deckt alle aktuellen Backups ab.</string>
+    <string name="purge_will_delete">%1 ältere(s) Backup(s) werden gelöscht.</string>
+    <string name="msg_purged">%1 alte(s) Backup(s) gelöscht</string>
+    <!-- Exclude profiles -->
+    <string name="title_profiles">Profile</string>
+    <string name="title_save_profile">Profil speichern</string>
+    <string name="title_load_profile">Profil laden</string>
+    <string name="label_profile_name">Profilname:</string>
+    <string name="label_select_profile">Profil zum Anwenden auswählen:</string>
+    <string name="button_save_profile">Aktuelles als Profil speichern</string>
+    <string name="button_load_profile">Profil laden</string>
+    <string name="profile_count">%1 Apps</string>
+    <string name="msg_no_profiles">Keine gespeicherten Profile</string>
+    <string name="msg_profile_saved">Profil "%1" gespeichert</string>
+    <string name="msg_profile_loaded">Profil "%1" angewendet</string>
 </resources>

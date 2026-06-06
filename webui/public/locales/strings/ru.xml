@@ -169,4 +169,24 @@
     <string name="repo_main">Основной</string>
     <string name="repo_more">ещё</string>
     <string name="repo_placeholder_name">Отображаемое имя</string>
+    <!-- Backup purge -->
+    <string name="title_purge_backups">Удалить старые бэкапы</string>
+    <string name="label_keep_count">Оставить последние бэкапов:</string>
+    <string name="button_purge">Удалить</string>
+    <string name="button_purge_old">Очистить старые</string>
+    <string name="purge_none_to_delete">Нечего удалять — лимит хранения покрывает все текущие бэкапы.</string>
+    <string name="purge_will_delete">Будут удалены %1 старых бэкапов.</string>
+    <string name="msg_purged">%1 старых бэкапов удалено</string>
+    <!-- Exclude profiles -->
+    <string name="title_profiles">Профили</string>
+    <string name="title_save_profile">Сохранить профиль</string>
+    <string name="title_load_profile">Загрузить профиль</string>
+    <string name="label_profile_name">Имя профиля:</string>
+    <string name="label_select_profile">Выберите профиль для применения:</string>
+    <string name="button_save_profile">Сохранить текущий как профиль</string>
+    <string name="button_load_profile">Загрузить профиль</string>
+    <string name="profile_count">%1 приложений</string>
+    <string name="msg_no_profiles">Нет сохранённых профилей</string>
+    <string name="msg_profile_saved">Профиль «%1» сохранён</string>
+    <string name="msg_profile_loaded">Профиль «%1» применён</string>
 </resources>

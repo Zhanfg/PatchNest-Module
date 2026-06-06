@@ -165,7 +165,61 @@ async function refreshBackupList() {
 export function initBackupPage() {
     document.getElementById('backup-refresh').onclick = refreshBackupList;
 
+    const purgeBtn = document.getElementById('purge-backups');
+    if (purgeBtn) purgeBtn.onclick = openPurgeDialog;
+
     setupPullToRefresh(document.querySelector('#backup-page .page-content'), refreshBackupList);
+}
+
+/**
+ * Open the purge dialog. On confirm, the N newest backups are kept
+ * and all older ones are deleted. The dialog shows a preview of what
+ * will be deleted before the user confirms.
+ */
+async function openPurgeDialog() {
+    const dialog = document.getElementById('purge-dialog');
+    if (!dialog) return;
+    const keepInput = document.getElementById('purge-keep-count');
+    const preview = document.getElementById('purge-preview');
+    const confirmBtn = dialog.querySelector('.confirm');
+    const cancelBtn = dialog.querySelector('.cancel');
+
+    const updatePreview = async () => {
+        const count = parseInt(keepInput.value) || 3;
+        const backups = await getBackupList();
+        const toDelete = backups.slice(count); // older = after the N newest
+        if (toDelete.length === 0) {
+            preview.textContent = getString('purge_none_to_delete');
+            if (confirmBtn) confirmBtn.disabled = true;
+        } else {
+            preview.textContent = getString('purge_will_delete', toDelete.length);
+            if (confirmBtn) confirmBtn.disabled = false;
+        }
+    };
+    keepInput.addEventListener('input', updatePreview);
+    updatePreview();
+
+    cancelBtn.onclick = () => dialog.close();
+    confirmBtn.onclick = async () => {
+        const count = parseInt(keepInput.value) || 3;
+        // Refresh the list to get the current order.
+        const backups = await getBackupList();
+        const toDelete = backups.slice(count);
+        if (toDelete.length === 0) {
+            dialog.close();
+            return;
+        }
+        // Delete each backup.
+        for (const b of toDelete) {
+            const baseName = String(b.name).split('/').pop().split('\\').pop();
+            if (!baseName || baseName.includes('..')) continue;
+            await exec(`rm -f ${escapeShell(BACKUP_DIR + '/' + baseName)}`);
+        }
+        toast(getString('msg_purged', toDelete.length));
+        dialog.close();
+        refreshBackupList();
+    };
+    dialog.show();
 }
 
 export { refreshBackupList };

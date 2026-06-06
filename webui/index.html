@@ -82,6 +82,11 @@
                         <md-menu-item id="refresh-app-list" data-i18n="button_refresh">Refresh</md-menu-item>
                         <md-menu-item id="export-exclude-list" data-i18n="button_export">Export</md-menu-item>
                         <md-menu-item id="import-exclude-list" data-i18n="button_import">Import</md-menu-item>
+                        <md-menu-item id="exclude-profile-menu">
+                            <div slot="headline" data-i18n="title_profiles">Profiles</div>
+                            <md-menu-item id="save-profile-btn" data-i18n="button_save_profile">Save current as profile</md-menu-item>
+                            <md-menu-item id="load-profile-btn" data-i18n="button_load_profile">Load profile</md-menu-item>
+                        </md-menu-item>
                         <md-menu-item>
                             <label slot="headline" for="show-system-app" data-i18n="label_show_system_app">Show system app</label>
                             <md-checkbox slot="end" id="show-system-app"></md-checkbox>
@@ -263,6 +268,9 @@
             <!-- Backups -->
             <div id="backup-page" class="page">
                 <div class="page-content">
+                    <div class="content-padding">
+                        <md-text-button id="purge-backups" class="installed-only" data-i18n="button_purge_old">Purge old backups</md-text-button>
+                    </div>
                     <div class="module-list content-padding fab-padding" id="backup-list"></div>
                     <div class="empty-list" id="backup-empty-msg" data-i18n="msg_no_backups">No backups available</div>
                 </div>
@@ -482,6 +490,19 @@
         <div slot="actions">
             <md-text-button class="changelog-close" data-i18n="button_close">Close</md-text-button>
             <md-text-button id="changelog-view-all" data-i18n="button_view_full_changelog">View full changelog</md-text-button>
+        </div>
+    </md-dialog>
+    <!-- Purge backups dialog -->
+    <md-dialog id="purge-dialog">
+        <div slot="headline" data-i18n="title_purge_backups">Purge old backups</div>
+        <div slot="content">
+            <div data-i18n="label_keep_count">Keep the most recent backups:</div>
+            <md-outlined-text-field id="purge-keep-count" label="Keep count" type="number" value="3" min="1"></md-outlined-text-field>
+            <div id="purge-preview" class="update-hint"></div>
+        </div>
+        <div slot="actions">
+            <md-text-button class="cancel" data-i18n="button_cancel">Cancel</md-text-button>
+            <md-filled-button class="confirm" data-i18n="button_purge">Purge</md-filled-button>
         </div>
     </md-dialog>
 </body>

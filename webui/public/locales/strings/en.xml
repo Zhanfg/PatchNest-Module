@@ -162,6 +162,26 @@
     <string name="repo_main">Main</string>
     <string name="repo_more">more</string>
     <string name="repo_placeholder_name">Display name</string>
+    <!-- Backup purge -->
+    <string name="title_purge_backups">Purge old backups</string>
+    <string name="label_keep_count">Keep the most recent backups:</string>
+    <string name="button_purge">Purge</string>
+    <string name="button_purge_old">Purge old backups</string>
+    <string name="purge_none_to_delete">Nothing to delete — your retention count covers all current backups.</string>
+    <string name="purge_will_delete">Will delete %1$d older backup(s).</string>
+    <string name="msg_purged">Purged %1$d old backup(s)</string>
+    <!-- Exclude profiles -->
+    <string name="title_profiles">Profiles</string>
+    <string name="title_save_profile">Save profile</string>
+    <string name="title_load_profile">Load profile</string>
+    <string name="label_profile_name">Profile name:</string>
+    <string name="label_select_profile">Select a profile to apply:</string>
+    <string name="button_save_profile">Save current as profile</string>
+    <string name="button_load_profile">Load profile</string>
+    <string name="profile_count">%1$d apps</string>
+    <string name="msg_no_profiles">No saved profiles</string>
+    <string name="msg_profile_saved">Profile \"%1$s\" saved</string>
+    <string name="msg_profile_loaded">Profile \"%1$s\" applied</string>
     <!-- Exclude list import/export -->
     <string name="button_export">Export</string>
     <string name="button_import">Import</string>

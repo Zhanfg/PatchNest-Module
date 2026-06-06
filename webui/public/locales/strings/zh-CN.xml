@@ -169,4 +169,24 @@
     <string name="repo_main">主仓库</string>
     <string name="repo_more">更多</string>
     <string name="repo_placeholder_name">显示名称</string>
+    <!-- Backup purge -->
+    <string name="title_purge_backups">清理旧备份</string>
+    <string name="label_keep_count">保留最近的备份数:</string>
+    <string name="button_purge">清理</string>
+    <string name="button_purge_old">清理旧备份</string>
+    <string name="purge_none_to_delete">没有可删除的 — 保留数量已覆盖所有当前备份。</string>
+    <string name="purge_will_delete">将删除 %1 个旧备份。</string>
+    <string name="msg_purged">已清理 %1 个旧备份</string>
+    <!-- Exclude profiles -->
+    <string name="title_profiles">预设</string>
+    <string name="title_save_profile">保存预设</string>
+    <string name="title_load_profile">加载预设</string>
+    <string name="label_profile_name">预设名称:</string>
+    <string name="label_select_profile">选择要应用的预设:</string>
+    <string name="button_save_profile">将当前保存为预设</string>
+    <string name="button_load_profile">加载预设</string>
+    <string name="profile_count">%1 个应用</string>
+    <string name="msg_no_profiles">没有已保存的预设</string>
+    <string name="msg_profile_saved">预设 %1 已保存</string>
+    <string name="msg_profile_loaded">预设 %1 已应用</string>
 </resources>

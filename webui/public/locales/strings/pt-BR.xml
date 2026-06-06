@@ -169,4 +169,24 @@
     <string name="repo_main">Principal</string>
     <string name="repo_more">mais</string>
     <string name="repo_placeholder_name">Nome de exibição</string>
+    <!-- Backup purge -->
+    <string name="title_purge_backups">Purgar backups antigos</string>
+    <string name="label_keep_count">Manter os backups mais recentes:</string>
+    <string name="button_purge">Purgar</string>
+    <string name="button_purge_old">Purgar antigos</string>
+    <string name="purge_none_to_delete">Nada a excluir — seu limite de retenção cobre todos os backups atuais.</string>
+    <string name="purge_will_delete">Excluirá %1 backup(s) antigo(s).</string>
+    <string name="msg_purged">%1 backup(s) antigo(s) purgados</string>
+    <!-- Exclude profiles -->
+    <string name="title_profiles">Perfis</string>
+    <string name="title_save_profile">Salvar perfil</string>
+    <string name="title_load_profile">Carregar perfil</string>
+    <string name="label_profile_name">Nome do perfil:</string>
+    <string name="label_select_profile">Selecione um perfil para aplicar:</string>
+    <string name="button_save_profile">Salvar atual como perfil</string>
+    <string name="button_load_profile">Carregar perfil</string>
+    <string name="profile_count">%1 apps</string>
+    <string name="msg_no_profiles">Nenhum perfil salvo</string>
+    <string name="msg_profile_saved">Perfil "%1" salvo</string>
+    <string name="msg_profile_loaded">Perfil "%1" aplicado</string>
 </resources>

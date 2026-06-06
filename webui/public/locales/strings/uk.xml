@@ -169,4 +169,24 @@
     <string name="repo_main">Головний</string>
     <string name="repo_more">ще</string>
     <string name="repo_placeholder_name">Відображуване ім'я</string>
+    <!-- Backup purge -->
+    <string name="title_purge_backups">Видалити старі бекапи</string>
+    <string name="label_keep_count">Зберегти останніх бекапів:</string>
+    <string name="button_purge">Видалити</string>
+    <string name="button_purge_old">Очистити старі</string>
+    <string name="purge_none_to_delete">Нема чого видаляти — ваш ліміт зберігання охоплює всі поточні бекапи.</string>
+    <string name="purge_will_delete">Буде видалено %1 старих бекапів.</string>
+    <string name="msg_purged">%1 старих бекапів видалено</string>
+    <!-- Exclude profiles -->
+    <string name="title_profiles">Профілі</string>
+    <string name="title_save_profile">Зберегти профіль</string>
+    <string name="title_load_profile">Завантажити профіль</string>
+    <string name="label_profile_name">Назва профілю:</string>
+    <string name="label_select_profile">Виберіть профіль для застосування:</string>
+    <string name="button_save_profile">Зберегти поточний як профіль</string>
+    <string name="button_load_profile">Завантажити профіль</string>
+    <string name="profile_count">%1 додатків</string>
+    <string name="msg_no_profiles">Немає збережених профілів</string>
+    <string name="msg_profile_saved">Профіль «%1» збережено</string>
+    <string name="msg_profile_loaded">Профіль «%1» застосовано</string>
 </resources>

@@ -918,6 +918,48 @@ md-menu-item label {
     align-self: flex-start;
 }
 
+.profile-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 50vh;
+    overflow-y: auto;
+}
+
+.profile-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background-color 150ms ease;
+}
+
+.profile-row:hover {
+    background: var(--md-sys-color-surface-container, #f3edf7);
+}
+
+.profile-name {
+    flex: 1;
+    font-weight: 500;
+    font-size: 0.95em;
+}
+
+.profile-count {
+    font-size: 0.85em;
+    color: var(--md-sys-color-on-surface-variant, #49454f);
+}
+
+.profile-delete-btn {
+    --md-icon-button-icon-size: 18px;
+    opacity: 0.5;
+}
+
+.profile-delete-btn:hover {
+    opacity: 1;
+}
+
 md-dialog [slot="content"] {
     display: flex;
     flex-direction: column;

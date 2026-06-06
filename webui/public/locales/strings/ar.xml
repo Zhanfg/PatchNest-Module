@@ -169,4 +169,24 @@
     <string name="repo_main">رئيسي</string>
     <string name="repo_more">المزيد</string>
     <string name="repo_placeholder_name">اسم العرض</string>
+    <!-- Backup purge -->
+    <string name="title_purge_backups">حذف النسخ الاحتياطية القديمة</string>
+    <string name="label_keep_count">الاحتفاظ بآخر نسخ احتياطية:</string>
+    <string name="button_purge">حذف</string>
+    <string name="button_purge_old">حذف النسخ القديمة</string>
+    <string name="purge_none_to_delete">لا شيء للحذف — عدد الاحتفاظ يغطي جميع النسخ الحالية.</string>
+    <string name="purge_will_delete">سيتم حذف %1 نسخة(نسخ) احتياطية أقدم.</string>
+    <string name="msg_purged">تم حذف %1 نسخة(نسخ) احتياطية قديمة</string>
+    <!-- Exclude profiles -->
+    <string name="title_profiles">الملفات الشخصية</string>
+    <string name="title_save_profile">حفظ ملف</string>
+    <string name="title_load_profile">تحميل ملف</string>
+    <string name="label_profile_name">اسم الملف الشخصي:</string>
+    <string name="label_select_profile">اختر ملفًا شخصيًا للتطبيق:</string>
+    <string name="button_save_profile">حفظ الحالي كملف شخصي</string>
+    <string name="button_load_profile">تحميل ملف شخصي</string>
+    <string name="profile_count">%1 تطبيقات</string>
+    <string name="msg_no_profiles">لا توجد ملفات شخصية محفوظة</string>
+    <string name="msg_profile_saved">تم حفظ الملف الشخصي "%1"</string>
+    <string name="msg_profile_loaded">تم تطبيق الملف الشخصي "%1"</string>
 </resources>
