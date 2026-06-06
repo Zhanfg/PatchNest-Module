@@ -220,4 +220,23 @@
     <string name="msg_export_failed">Export failed</string>
     <string name="msg_import_success">Imported %1$d apps</string>
     <string name="msg_import_failed">Import failed: %1$s</string>
+    <!-- KPM dashboard -->
+    <string name="kpm_stat_state">State</string>
+    <string name="kpm_stat_size">Size</string>
+    <string name="kpm_stat_uptime">Uptime</string>
+    <string name="kpm_stat_last_event">Last event</string>
+    <string name="kpm_stat_filters">Filters</string>
+    <string name="kpm_stat_errors">Errors</string>
+    <string name="kpm_stat_build">Build</string>
+    <string name="kpm_stat_unsigned_warn">Warning: unsigned module loaded (warn policy)</string>
+    <string name="kpm_stat_just_now">just now</string>
+    <string name="kpm_state_loaded">Loaded</string>
+    <string name="kpm_state_failed">Failed</string>
+    <string name="kpm_state_pending">Pending</string>
+    <string name="kpm_state_unknown">Unknown</string>
+    <string name="kpm_hero_ok">System OK · %1$d loaded · %2$d failed</string>
+    <string name="kpm_hero_down">System DEGRADED · %1$d loaded · %2$d failed</string>
+    <string name="kpm_hero_empty">No KPM modules loaded</string>
+    <string name="kpm_dashboard_full_title">KPM dashboard</string>
+    <string name="kpm_dashboard_expand">View full dashboard</string>
 </resources>

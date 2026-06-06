@@ -217,4 +217,23 @@
     <string name="button_open_in_ksu">在 KSU 管理器中打开</string>
     <string name="msg_module_disabled">模块在管理器中已禁用</string>
     <string name="msg_no_config">暂无配置项 — 在下方输入「key=value」并点击保存</string>
+    <!-- KPM 仪表盘 -->
+    <string name="kpm_stat_state">状态</string>
+    <string name="kpm_stat_size">大小</string>
+    <string name="kpm_stat_uptime">运行时长</string>
+    <string name="kpm_stat_last_event">最近事件</string>
+    <string name="kpm_stat_filters">过滤数</string>
+    <string name="kpm_stat_errors">错误数</string>
+    <string name="kpm_stat_build">构建</string>
+    <string name="kpm_stat_unsigned_warn">警告：已加载未签名的模块 (警告策略)</string>
+    <string name="kpm_stat_just_now">刚刚</string>
+    <string name="kpm_state_loaded">已加载</string>
+    <string name="kpm_state_failed">加载失败</string>
+    <string name="kpm_state_pending">等待中</string>
+    <string name="kpm_state_unknown">未知</string>
+    <string name="kpm_hero_ok">系统正常 · 已加载 %1$d · 失败 %2$d</string>
+    <string name="kpm_hero_down">系统异常 · 已加载 %1$d · 失败 %2$d</string>
+    <string name="kpm_hero_empty">未加载任何 KPM 模块</string>
+    <string name="kpm_dashboard_full_title">KPM 仪表盘</string>
+    <string name="kpm_dashboard_expand">查看完整仪表盘</string>
 </resources>

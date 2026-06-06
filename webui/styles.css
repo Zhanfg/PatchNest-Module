@@ -1164,3 +1164,182 @@ md-dialog .checkbox-item {
 .fab-padding {
     padding-bottom: 72px;
 }
+
+/* -------------------------------------------------------------------------
+ * KPM dashboard
+ *
+ * Per-card mini-dashboard (state + uptime + size + last event) and a
+ * full-page dialog with the same metrics at a larger size. All colors
+ * are token-driven so dark mode + custom themes work without
+ * additional rules.
+ * ------------------------------------------------------------------------- */
+
+.kpm-hero {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px 4px;
+    font-size: 0.85em;
+    color: var(--md-sys-color-on-surface-variant, #49454f);
+}
+
+.kpm-hero.hidden { display: none; }
+
+.kpm-hero-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--md-sys-color-on-surface-variant, #49454f);
+    flex: 0 0 10px;
+}
+
+.kpm-hero-dot.kpm-hero-ok {
+    background: var(--md-sys-color-primary, #6750a4);
+}
+.kpm-hero-dot.kpm-hero-down {
+    background: var(--md-sys-color-error, #b3261e);
+}
+.kpm-hero-dot.kpm-hero-idle {
+    background: var(--md-sys-color-on-surface-variant, #49454f);
+}
+
+.kpm-hero-text { line-height: 1.2; }
+
+.kpm-dashboard-mini {
+    padding: 4px 0 8px;
+}
+
+.kpm-dashboard-mini-row {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    align-items: start;
+}
+
+.kpm-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.kpm-stat-label {
+    font-size: 0.7em;
+    color: var(--md-sys-color-on-surface-variant, #49454f);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.kpm-stat-value {
+    font-size: 0.85em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--md-sys-color-on-surface, #1d1b20);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.kpm-state-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--md-sys-color-on-surface-variant, #49454f);
+    flex: 0 0 8px;
+}
+
+.kpm-state-loaded .kpm-state-dot,
+.kpm-state-dot.kpm-state-loaded {
+    background: var(--md-sys-color-primary, #6750a4);
+}
+.kpm-state-failed .kpm-state-dot,
+.kpm-state-dot.kpm-state-failed {
+    background: var(--md-sys-color-error, #b3261e);
+}
+.kpm-state-pending .kpm-state-dot,
+.kpm-state-dot.kpm-state-pending {
+    background: var(--md-sys-color-on-surface-variant, #49454f);
+}
+
+.kpm-state-loaded.kpm-stat-value { color: var(--md-sys-color-primary, #6750a4); }
+.kpm-state-failed.kpm-stat-value { color: var(--md-sys-color-error, #b3261e); }
+.kpm-state-pending.kpm-stat-value { color: var(--md-sys-color-on-surface-variant, #49454f); }
+
+.kpm-dashboard-warn {
+    margin-top: 8px;
+    font-size: 0.75em;
+    color: var(--md-sys-color-error, #b3261e);
+    background: var(--md-sys-color-error-container, #f9dedc);
+    padding: 4px 8px;
+    border-radius: 6px;
+}
+
+.kpm-dashboard-full {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 240px;
+}
+
+.kpm-dashboard-full-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--md-sys-color-outline-variant, #cac4d0);
+}
+
+.kpm-dashboard-full-row:last-of-type { border-bottom: none; }
+
+.kpm-dashboard-full-label {
+    color: var(--md-sys-color-on-surface-variant, #49454f);
+    font-size: 0.85em;
+}
+
+.kpm-dashboard-full-value {
+    color: var(--md-sys-color-on-surface, #1d1b20);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.95em;
+    text-align: right;
+}
+
+.kpm-dashboard-full-sub {
+    color: var(--md-sys-color-on-surface-variant, #49454f);
+    font-size: 0.8em;
+    padding-top: 4px;
+}
+
+/* Uptime bar — a thin coloured underline that fills proportionally.
+   Width is set inline via --kpm-uptime-pct (0–1). */
+.kpm-uptime-bar {
+    display: block;
+    width: 100%;
+    height: 2px;
+    background: var(--md-sys-color-surface-container-high, #ece6f0);
+    border-radius: 1px;
+    overflow: hidden;
+    margin-top: 2px;
+}
+
+.kpm-uptime-bar > i {
+    display: block;
+    height: 100%;
+    width: calc(var(--kpm-uptime-pct, 0) * 100%);
+    background: var(--md-sys-color-primary, #6750a4);
+    transition: width 0.3s ease;
+}
+
+/* Narrow screens: drop to a 2x2 grid for the mini-dashboard. */
+@media (max-width: 420px) {
+    .kpm-dashboard-mini-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
