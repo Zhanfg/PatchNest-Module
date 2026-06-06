@@ -2,7 +2,7 @@ import { exec, toast } from 'kernelsu-alt';
 import { modDir, persistDir } from '../index.js';
 import { getString } from '../language.js';
 import { setupPullToRefresh } from '../pull-to-refresh.js';
-import { escapeHTML, sanitizeUrl } from '../utils.js';
+import { escapeHTML, sanitizeUrl, formatSize } from '../utils.js';
 
 const DEFAULT_REPO_URL = 'https://raw.githubusercontent.com/Zhanfg/KPatch-Next-Module/main/kpm_repo.json';
 const REPOS_KEY = 'kp-next_repos';
@@ -43,13 +43,13 @@ function setRepos(repos) {
 /**
  * Backwards-compat shim. The old single-URL API is still imported by
  * index.js for the Settings detail line; redirect to the primary repo.
+ *
+ * P2-fix: both functions had no callers in any *.js/*.html across the
+ * project (verified by grep). They were only re-exported at the bottom
+ * of this file. Safe to delete; keep a stub comment for one release to
+ * avoid surprising downstream forks.
  */
-function getRepoUrl() {
-    return getRepos()[0]?.url || DEFAULT_REPO_URL;
-}
-function setRepoUrl(url) {
-    setRepos([{ url, name: getString('repo_main') }]);
-}
+// getRepoUrl/setRepoUrl removed in PR3. Use getRepos()/setRepos() instead.
 
 async function fetchRepo() {
     const repos = getRepos();
@@ -159,12 +159,6 @@ function renderRepoList() {
     });
 
     applyFilters();
-}
-
-function formatSize(bytes) {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
 async function installFromRepo(mod) {
@@ -363,4 +357,4 @@ export function initRepoPage() {
     setupPullToRefresh(document.querySelector('#repo-page .page-content'), fetchRepo);
 }
 
-export { fetchRepo, getRepoUrl, setRepoUrl, getRepos, setRepos, openRepoManager };
+export { fetchRepo, getRepos, setRepos, openRepoManager };

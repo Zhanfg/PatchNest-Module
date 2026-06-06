@@ -2,7 +2,7 @@ import { exec, spawn, toast } from 'kernelsu-alt';
 import { modDir, escapeShell } from '../index.js';
 import { handleFileUpload, uploadFile } from './kpm.js';
 import { getString } from '../language.js';
-import { escapeHTML } from '../utils.js';
+import { escapeHTML, formatSize } from '../utils.js';
 import { startProgress, resetProgress } from '../patch-progress.js';
 
 function uInt2String(ver) {
@@ -13,13 +13,6 @@ function uInt2String(ver) {
     const patch = (val & 0x0000ff);
 
     return `${major}.${minor}.${patch}`;
-}
-
-function formatSize(bytes) {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-    return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
 }
 
 function parseIni(str) {
@@ -208,8 +201,14 @@ async function extractAndParseBootimg() {
 
     // Prepare work directory
     const prepare = spawn(`mkdir -p ${modDir}/tmp && rm -rf ${modDir}/tmp/* && cp ${modDir}/bin/kpimg ${modDir}/tmp/`);
-    await new Promise((resolve) => {
-        prepare.on('exit', () => resolve());
+    await new Promise((resolve, reject) => {
+        // P1-Cluster C fix: only resolve on exit code 0; reject on any
+        // non-zero exit so the patch can fail fast instead of producing
+        // a corrupt boot image when kpimg is missing.
+        prepare.on('exit', (code) => {
+            if (code === 0) resolve();
+            else reject(new Error(`prepare failed with exit code ${code}`));
+        });
     });
 
     // get slot and device
@@ -332,8 +331,15 @@ async function embedKPM() {
         embedBtn.disabled = true;
         startBtn.disabled = true;
 
-        // Generate random filename
-        const randName = Math.random().toString(36).substring(7) + '.kpm';
+        // Generate random filename.
+        // P1-Cluster A fix: Math.random() is non-cryptographic and only
+        // gives ~30 bits of entropy in 6 base36 chars. Two near-simultaneous
+        // uploads could collide. crypto.randomUUID() is a strong 122-bit
+        // source available in all modern WebViews (Chromium 92+).
+        const randName = (typeof crypto !== 'undefined' && crypto.randomUUID
+            ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
+            : Math.random().toString(36).substring(7)
+        ) + '.kpm';
         const tmpPath = `${modDir}/tmp/${randName}`;
 
         try {
@@ -452,7 +458,14 @@ function patch(type) {
             kimgInfo = { banner: '', patched: false };
             newExtras = [];
         }
-        exec(`rm -rf ${modDir}/tmp`);
+        // P1-Cluster C fix: await the cleanup so it can't race with a
+        // subsequent patch start. The previous fire-and-forget meant a
+        // second patch could begin while tmp/ was being deleted.
+        try {
+            await exec(`rm -rf ${modDir}/tmp`);
+        } catch (_) {
+            // best-effort; if rm fails the next upload's mkdir will retry
+        }
     });
 }
 

@@ -2,7 +2,7 @@ import { exec, toast } from 'kernelsu-alt';
 import { persistDir, modDir, escapeShell } from '../index.js';
 import { getString } from '../language.js';
 import { setupPullToRefresh } from '../pull-to-refresh.js';
-import { escapeHTML } from '../utils.js';
+import { escapeHTML, formatSize } from '../utils.js';
 
 const BACKUP_DIR = `${persistDir}/backup`;
 
@@ -57,12 +57,6 @@ async function computeHashes(names) {
         if (m) map.set(m[2], m[1]);
     });
     return names.map(n => map.get(`${BACKUP_DIR}/${n}`) || '');
-}
-
-function formatSize(bytes) {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
 async function refreshBackupList() {
@@ -196,7 +190,10 @@ async function openPurgeDialog() {
             if (confirmBtn) confirmBtn.disabled = false;
         }
     };
-    keepInput.addEventListener('input', updatePreview);
+    // P1-Cluster C fix: the listener was being re-added on every open of
+    // the purge dialog. Use .oninput which auto-replaces the previous
+    // handler, so we never accumulate handlers on the same element.
+    keepInput.oninput = updatePreview;
     updatePreview();
 
     cancelBtn.onclick = () => dialog.close();

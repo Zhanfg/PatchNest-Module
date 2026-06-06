@@ -48,3 +48,18 @@ export function sanitizeUrl(url) {
         return null;
     }
 }
+
+/**
+ * Format bytes into a human-readable size string.
+ * Centralised here to remove the 3 duplicate copies that previously
+ * lived in backup.js, kpm_repo.js, and patch.js.
+ * @param {number} bytes - Byte count
+ * @returns {string} - e.g. "1.4 MB" / "2.50 GB" / "512 B"
+ */
+export function formatSize(bytes) {
+    if (bytes == null || isNaN(bytes)) return '? B';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+}

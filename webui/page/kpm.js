@@ -356,9 +356,17 @@ async function handleFileUpload(accept, containerId, onSelected) {
         const file = e.target.files[0];
         if (!file) return;
 
-        if (accept && !file.name.endsWith(accept)) {
-            toast(getString('msg_please_select_file', accept));
-            return;
+        // P1-Cluster A fix: previous code did `file.name.endsWith(accept)`
+        // which never matches when accept is a comma-separated list
+        // (e.g. ".kpm,.zip"). Split on comma, trim, and match any.
+        if (accept) {
+            const exts = accept.split(',').map(s => s.trim()).filter(Boolean);
+            const lowerName = file.name.toLowerCase();
+            const ok = exts.some(ext => lowerName.endsWith(ext.toLowerCase()));
+            if (!ok) {
+                toast(getString('msg_please_select_file', accept));
+                return;
+            }
         }
 
         const abortController = new AbortController();

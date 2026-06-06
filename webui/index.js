@@ -36,6 +36,18 @@ try {
 import { setupRoute } from './route.js';
 import { getString, loadTranslations } from './language.js';
 import { modDir, persistDir, escapeShell, linkRedirect, getMaxChunkSize } from './constants.js';
+// NOTE: PR3 deferred this to a future iteration. The 6 page modules
+// below are eagerly imported because switching to dynamic import()
+// would require changing switchPage() in route.js to handle a promise.
+// The audit report flagged it as a P2 bundle-size optimization; the
+// recommended fix is:
+//   1. Replace `import * as xModule from './page/x.js'` with:
+//        const xModule = { init: () => import('./page/x.js').then(m => m.init()) };
+//   2. In route.js:switchPage, await the import on first visit and
+//      cache the module reference in a Map for subsequent visits.
+// For now, the WebUI loads ~200KB of page JS on cold start; the perf
+// win from the fix above is meaningful on low-end Android (entry-level
+// 4GB devices in 2026 are still common).
 import * as patchModule from './page/patch.js';
 import * as kpmModule from './page/kpm.js';
 import * as excludeModule from './page/exclude.js';

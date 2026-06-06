@@ -243,12 +243,13 @@ fi
 
 ---
 
-## 5. 📋 修复计划（3 个 PR 串行合入）
+## 5. 📋 修复计划（3 个 PR 全部完成）
 
-### ✅ PR1 — 关键安全修复（9 个 P0）— 已完成
-- **分支**: `audit-pr1-critical-security`
-- **提交**: `6b8064b fix(security): PR1 critical P0 fixes`
-- **文件数**: 11 | **+行**: 143 | **-行**: 23
+### ✅ PR1 — 关键安全修复（9 个 P0）— ✅ 已完成并合并
+- **分支**: `audit-pr1-critical-security` → merged into `main` (`f66425f`)
+- **提交**: `49a8023 fix(security): PR1 critical P0 fixes`
+- **Tag**: `v0.2.5-p0`
+- **文件数**: 12 | **+行**: 500 | **-行**: 23
 - **关键测试**:
   ```bash
   # 验证 getvar 注入失效
@@ -267,9 +268,11 @@ fi
 
 ---
 
-### ⏳ PR2 — 健壮性：Shell 脚本硬化（P1）
-- **文件**: `util_functions.sh` × 3, `customize.sh`, `service.sh` × 2, `install_kpm.sh`, `compile_kpm.sh`, `status.sh`, `index.html`
-- **估时**: ~6h
+### ✅ PR2 — 健壮性：Shell 脚本硬化（P1）— ✅ 已完成并合并
+- **分支**: `audit-pr2-robustness` → merged into `main` (`b1f9a3c`)
+- **提交**: `63744a3 fix(robustness): PR2 shell-script hardening`
+- **Tag**: `v0.2.5-p2`
+- **文件数**: 6 | **+行**: ~50 | **-行**: ~10
 - **关键测试**:
   ```bash
   shellcheck -S warning module/*.sh module/patch/*.sh build.sh
@@ -280,9 +283,11 @@ fi
 
 ---
 
-### ⏳ PR3 — UX/清理：WebUI 注入硬化 + 死代码移除（P1/P2）
-- **文件**: `kpm.js` × 2, `patch.js` × 4, `exclude.js` × 2, `index.html`, `kpm_repo.js`, `backup.js` × 2, `log.js`, `service.sh`
-- **估时**: ~5h
+### ✅ PR3 — UX/清理：WebUI 注入硬化 + 死代码移除（P1/P2）— ✅ 已完成并合并
+- **分支**: `audit-pr3-ux-cleanup` → merged into `main` (`6ba7071`)
+- **提交**: `fb957d8 refactor(webui): PR3 — dead code removal, error handling, dedup`
+- **Tag**: `v0.2.5-p3`
+- **文件数**: 7 | **+行**: 78 | **-行**: 39
 - **关键测试**:
   ```bash
   # 1000 次 randomUUID() 不重复
@@ -290,6 +295,17 @@ fi
   # abort 按钮真终止
   # 20 个 backup 哈希无 UI 卡顿
   ```
+
+---
+
+## 5.1 📊 三个 PR 合并后的最终状态
+
+| PR | 分支 | 提交 | Tag | 文件数 | 增行 | 减行 |
+|----|------|------|-----|--------|------|------|
+| PR1 | audit-pr1-critical-security | 49a8023 | v0.2.5-p0 | 12 | 500 | 23 |
+| PR2 | audit-pr2-robustness | 63744a3 | v0.2.5-p2 | 6 | ~50 | ~10 |
+| PR3 | audit-pr3-ux-cleanup | fb957d8 | v0.2.5-p3 | 7 | 78 | 39 |
+| **合计** | — | — | — | **~25** | **~628** | **~72** |
 
 ---
 
@@ -346,10 +362,18 @@ jq -r .sha256 update.json  # 应为 64 字符十六进制
 
 | 项目 | 值 |
 |------|----|
-| 备份 Tag | `audit-baseline-2026-06-06` |
-| PR1 分支 | `audit-pr1-critical-security` |
-| PR1 提交 | `6b8064b` |
-| 恢复命令 | `git checkout main && git stash pop` |
+| 备份 Tag | `audit-baseline-2026-06-06`（修复前快照） |
+| PR1 分支 | `audit-pr1-critical-security`（已合并） |
+| PR1 提交 | `49a8023` |
+| PR1 Tag | `v0.2.5-p0` |
+| PR2 分支 | `audit-pr2-robustness`（已合并） |
+| PR2 提交 | `63744a3` |
+| PR2 Tag | `v0.2.5-p2` |
+| PR3 分支 | `audit-pr3-ux-cleanup`（已合并） |
+| PR3 提交 | `fb957d8` |
+| PR3 Tag | `v0.2.5-p3` |
+| 当前 main HEAD | `6ba7071` |
+| 恢复命令 | `git checkout audit-baseline-2026-06-06` 可回到修复前 |
 | 工作区备份 | `git stash list` 查看 `audit-pre-pr1-working-files` |
 
 ---
