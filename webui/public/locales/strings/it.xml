@@ -161,4 +161,12 @@
     <string name="button_later">Dopo</string>
     <string name="button_download">Scarica</string>
     <string name="status_checking">Verifica...</string>
+    <!-- Multi-repo manager -->
+    <string name="title_repo_manager">Gestisci repository</string>
+    <string name="button_add_repo">Aggiungi repository</string>
+    <string name="button_save">Salva</string>
+    <string name="repo_official">Ufficiale</string>
+    <string name="repo_main">Principale</string>
+    <string name="repo_more">altro</string>
+    <string name="repo_placeholder_name">Nome visualizzato</string>
 </resources>

@@ -161,4 +161,12 @@
     <string name="button_later">পরে</string>
     <string name="button_download">ডাউনলোড</string>
     <string name="status_checking">যাচাই হচ্ছে...</string>
+    <!-- Multi-repo manager -->
+    <string name="title_repo_manager">রিপোজিটরি পরিচালনা</string>
+    <string name="button_add_repo">রিপোজিটরি যোগ করুন</string>
+    <string name="button_save">সংরক্ষণ</string>
+    <string name="repo_official">অফিসিয়াল</string>
+    <string name="repo_main">প্রধান</string>
+    <string name="repo_more">আরও</string>
+    <string name="repo_placeholder_name">প্রদর্শন নাম</string>
 </resources>

@@ -161,4 +161,12 @@
     <string name="button_later">لاحقًا</string>
     <string name="button_download">تنزيل</string>
     <string name="status_checking">جارٍ التحقق...</string>
+    <!-- Multi-repo manager -->
+    <string name="title_repo_manager">إدارة المستودعات</string>
+    <string name="button_add_repo">إضافة مستودع</string>
+    <string name="button_save">حفظ</string>
+    <string name="repo_official">رسمي</string>
+    <string name="repo_main">رئيسي</string>
+    <string name="repo_more">المزيد</string>
+    <string name="repo_placeholder_name">اسم العرض</string>
 </resources>

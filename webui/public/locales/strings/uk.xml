@@ -161,4 +161,12 @@
     <string name="button_later">Пізніше</string>
     <string name="button_download">Завантажити</string>
     <string name="status_checking">Перевірка...</string>
+    <!-- Multi-repo manager -->
+    <string name="title_repo_manager">Керування репозиторіями</string>
+    <string name="button_add_repo">Додати репозиторій</string>
+    <string name="button_save">Зберегти</string>
+    <string name="repo_official">Офіційний</string>
+    <string name="repo_main">Головний</string>
+    <string name="repo_more">ще</string>
+    <string name="repo_placeholder_name">Відображуване ім'я</string>
 </resources>

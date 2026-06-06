@@ -161,4 +161,12 @@
     <string name="button_later">Позже</string>
     <string name="button_download">Загрузить</string>
     <string name="status_checking">Проверка...</string>
+    <!-- Multi-repo manager -->
+    <string name="title_repo_manager">Управление репозиториями</string>
+    <string name="button_add_repo">Добавить репозиторий</string>
+    <string name="button_save">Сохранить</string>
+    <string name="repo_official">Официальный</string>
+    <string name="repo_main">Основной</string>
+    <string name="repo_more">ещё</string>
+    <string name="repo_placeholder_name">Отображаемое имя</string>
 </resources>

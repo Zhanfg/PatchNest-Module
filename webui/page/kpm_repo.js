@@ -5,52 +5,109 @@ import { setupPullToRefresh } from '../pull-to-refresh.js';
 import { escapeHTML, sanitizeUrl } from '../utils.js';
 
 const DEFAULT_REPO_URL = 'https://raw.githubusercontent.com/Zhanfg/KPatch-Next-Module/main/kpm_repo.json';
-const REPO_URL_KEY = 'kp-next_repo_url';
+const REPOS_KEY = 'kp-next_repos';
 
+/**
+ * Repo list shape in localStorage:
+ *   [{ url: string, name: string }, ...]
+ * The first entry is treated as the "primary" repo for display purposes.
+ * Legacy kp-next_repo_url (a single string) is migrated on first read.
+ */
 let allModules = [];
 let searchQuery = '';
 
-function getRepoUrl() {
-    return localStorage.getItem(REPO_URL_KEY) || DEFAULT_REPO_URL;
+function getRepos() {
+    // Migrate the legacy single-URL key if present.
+    const legacy = localStorage.getItem('kp-next_repo_url');
+    if (legacy && !localStorage.getItem(REPOS_KEY)) {
+        const migrated = [{ url: legacy, name: 'Main' }];
+        localStorage.setItem(REPOS_KEY, JSON.stringify(migrated));
+        localStorage.removeItem('kp-next_repo_url');
+    }
+    try {
+        const parsed = JSON.parse(localStorage.getItem(REPOS_KEY) || 'null');
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    } catch (_) {}
+    // First-run default.
+    return [{ url: DEFAULT_REPO_URL, name: getString('repo_official') }];
 }
 
-function setRepoUrl(url) {
-    if (url && url.trim()) {
-        localStorage.setItem(REPO_URL_KEY, url.trim());
-    } else {
-        localStorage.removeItem(REPO_URL_KEY);
+function setRepos(repos) {
+    if (!Array.isArray(repos) || repos.length === 0) {
+        localStorage.removeItem(REPOS_KEY);
+        return;
     }
+    localStorage.setItem(REPOS_KEY, JSON.stringify(repos));
+}
+
+/**
+ * Backwards-compat shim. The old single-URL API is still imported by
+ * index.js for the Settings detail line; redirect to the primary repo.
+ */
+function getRepoUrl() {
+    return getRepos()[0]?.url || DEFAULT_REPO_URL;
+}
+function setRepoUrl(url) {
+    setRepos([{ url, name: getString('repo_main') }]);
 }
 
 async function fetchRepo() {
-    const rawUrl = getRepoUrl();
-    const safeUrl = sanitizeUrl(rawUrl);
-    if (!safeUrl) {
-        const emptyMsg = document.getElementById('repo-empty-msg');
-        emptyMsg.textContent = getString('msg_repo_fetch_failed');
-        return;
-    }
+    const repos = getRepos();
     const emptyMsg = document.getElementById('repo-empty-msg');
     emptyMsg.textContent = getString('status_loading');
     emptyMsg.classList.remove('hidden');
 
+    // Fan out: fetch each repo in parallel, then merge. The empty-msg
+    // state is updated as results come in: any successful repo hides
+    // the loading message; only the all-failed case keeps it visible.
+    const results = await Promise.all(repos.map(fetchOne));
+
+    // Merge modules, dedup by `id` (first-seen wins). Different repos can
+    // legitimately publish the same module under different names; dedup
+    // by id is the convention.
+    const seen = new Set();
+    const merged = [];
+    for (const r of results) {
+        if (!r) continue;
+        for (const m of r.modules) {
+            if (!m || !m.id) continue;
+            if (seen.has(m.id)) continue;
+            seen.add(m.id);
+            // Tag each module with which repo it came from, so the card
+            // can show the source and installFromRepo can quote it.
+            merged.push({ ...m, _repo: r.name, _repoUrl: r.url });
+        }
+    }
+    allModules = merged;
+
+    if (allModules.length === 0) {
+        emptyMsg.textContent = getString('msg_no_modules_in_repo');
+        emptyMsg.classList.remove('hidden');
+    } else {
+        emptyMsg.classList.add('hidden');
+    }
+    renderRepoList();
+}
+
+/**
+ * Fetch a single repo. Returns { name, url, modules: [] } on success,
+ * null on failure. Network errors and JSON parse errors are both
+ * tolerated — the caller just won't see modules from this repo.
+ */
+async function fetchOne(repo) {
+    const safeUrl = sanitizeUrl(repo.url);
+    if (!safeUrl) return null;
     try {
-        // Use kpatch to fetch via the device's network
         const result = await exec(
-            `curl -sL "${safeUrl}"`,
+            `curl -sL --max-time 10 "${safeUrl}"`,
             { env: { PATH: `${modDir}/bin:/system/bin:$PATH` } }
         );
-
-        if (result.errno !== 0 || !result.stdout.trim()) {
-            emptyMsg.textContent = getString('msg_repo_fetch_failed');
-            return;
-        }
-
-        const repo = JSON.parse(result.stdout);
-        allModules = repo.modules || [];
-        renderRepoList();
-    } catch (e) {
-        emptyMsg.textContent = getString('msg_error', e.message);
+        if (result.errno !== 0 || !result.stdout.trim()) return null;
+        const data = JSON.parse(result.stdout);
+        const modules = Array.isArray(data.modules) ? data.modules : [];
+        return { name: repo.name, url: repo.url, modules };
+    } catch (_) {
+        return null;
     }
 }
 
@@ -71,9 +128,18 @@ function renderRepoList() {
         const card = document.createElement('div');
         card.className = 'card module-card';
         const sizeStr = mod.size ? formatSize(mod.size) : '';
+        // Repo name rendered as a small tag so the user can see where
+        // each module came from. Empty when the source is the default
+        // "Official" repo, to keep the list uncluttered.
+        const repoTag = mod._repo && mod._repo !== getString('repo_official')
+            ? `<div class="tag tag-repo">${escapeHTML(mod._repo)}</div>`
+            : '';
         card.innerHTML = `
             <div class="module-card-header">
-                <div class="module-card-title">${escapeHTML(mod.name || mod.id)}</div>
+                <div class="flex-header">
+                    <div class="module-card-title">${escapeHTML(mod.name || mod.id)}</div>
+                    ${repoTag}
+                </div>
                 <div class="module-card-subtitle">${escapeHTML(mod.version || '0.0.0')} ${sizeStr ? '· ' + sizeStr : ''}</div>
                 <div class="module-card-subtitle">${getString('info_author', escapeHTML(mod.author) || getString('msg_unknown'))}</div>
             </div>
@@ -168,7 +234,7 @@ function applyFilters() {
 
     const emptyMsg = document.getElementById('repo-empty-msg');
     if (visibleCount === 0 && allModules.length > 0) {
-        emptyMsg.textContent = getString('msg_no_modules_in_repo');
+        emptyMsg.textContent = getString('msg_no_module_found');
         emptyMsg.classList.remove('hidden');
     } else if (allModules.length === 0) {
         emptyMsg.textContent = getString('msg_no_modules_in_repo');
@@ -176,6 +242,88 @@ function applyFilters() {
     } else {
         emptyMsg.classList.add('hidden');
     }
+}
+
+/**
+ * Open a dialog to manage the list of subscribed repos. Each row is
+ * [name | url] with a delete button; a footer "Add" button appends a
+ * new row. Saving the dialog persists the new repo list.
+ */
+function openRepoManager() {
+    const dialog = document.getElementById('repo-manager-dialog');
+    if (!dialog) return;
+    const list = dialog.querySelector('#repo-manager-list');
+    const addBtn = dialog.querySelector('.repo-add');
+    const saveBtn = dialog.querySelector('.repo-save');
+    const cancelBtn = dialog.querySelector('.repo-cancel');
+
+    const rebuild = () => {
+        const repos = getRepos();
+        list.innerHTML = '';
+        repos.forEach((r, idx) => {
+            const row = document.createElement('div');
+            row.className = 'repo-row';
+            row.innerHTML = `
+                <md-outlined-text-field label="Name" data-field="name" value="${escapeHTML(r.name || '')}"></md-outlined-text-field>
+                <md-outlined-text-field label="URL" data-field="url" value="${escapeHTML(r.url || '')}" type="url"></md-outlined-text-field>
+                <md-icon-button class="repo-remove" title="${getString('button_delete')}">
+                    <md-icon><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960"><path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z"/></svg></md-icon>
+                </md-icon-button>
+            `;
+            row.querySelector('.repo-remove').onclick = () => {
+                row.remove();
+            };
+            list.appendChild(row);
+        });
+    };
+
+    addBtn.onclick = () => {
+        const row = document.createElement('div');
+        row.className = 'repo-row';
+        row.innerHTML = `
+            <md-outlined-text-field label="Name" data-field="name" placeholder="${escapeHTML(getString('repo_placeholder_name'))}"></md-outlined-text-field>
+            <md-outlined-text-field label="URL" data-field="url" type="url" placeholder="https://..."></md-outlined-text-field>
+            <md-icon-button class="repo-remove" title="${getString('button_delete')}">
+                <md-icon><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960"><path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z"/></svg></md-icon>
+            </md-icon-button>
+        `;
+        row.querySelector('.repo-remove').onclick = () => row.remove();
+        list.appendChild(row);
+    };
+
+    saveBtn.onclick = () => {
+        const rows = list.querySelectorAll('.repo-row');
+        const newRepos = [];
+        for (const r of rows) {
+            const name = r.querySelector('[data-field="name"]')?.value?.trim();
+            const url = r.querySelector('[data-field="url"]')?.value?.trim();
+            if (!url) continue;
+            const safe = sanitizeUrl(url);
+            if (!safe) continue;
+            newRepos.push({ name: name || new URL(safe).hostname, url: safe });
+        }
+        if (newRepos.length === 0) {
+            // Don't allow an empty list — fall back to default.
+            newRepos.push({ url: DEFAULT_REPO_URL, name: getString('repo_official') });
+        }
+        setRepos(newRepos);
+        dialog.close();
+        // Update the Settings detail line.
+        const detail = document.getElementById('current-repo-url');
+        if (detail) {
+            const primary = newRepos[0];
+            detail.textContent = newRepos.length === 1
+                ? primary.url
+                : `${primary.name} (+${newRepos.length - 1} ${getString('repo_more')})`;
+        }
+        toast(getString('msg_repo_url_updated'));
+        // Auto-refresh the repo page with the new list.
+        fetchRepo();
+    };
+    cancelBtn.onclick = () => dialog.close();
+
+    rebuild();
+    dialog.show();
 }
 
 export function initRepoPage() {
@@ -215,4 +363,4 @@ export function initRepoPage() {
     setupPullToRefresh(document.querySelector('#repo-page .page-content'), fetchRepo);
 }
 
-export { fetchRepo, getRepoUrl, setRepoUrl };
+export { fetchRepo, getRepoUrl, setRepoUrl, getRepos, setRepos, openRepoManager };

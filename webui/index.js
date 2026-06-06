@@ -188,20 +188,22 @@ function initRepoSettings() {
     }
     const repoUrlInput = document.getElementById('repo-url-input');
 
-    repoUrlDetail.textContent = repoModule.getRepoUrl();
-
-    repoItem.onclick = () => {
-        repoUrlInput.value = repoModule.getRepoUrl();
-        repoUrlDialog.querySelector('.cancel').onclick = () => repoUrlDialog.close();
-        repoUrlDialog.querySelector('.confirm').onclick = () => {
-            const newUrl = repoUrlInput.value.trim();
-            repoModule.setRepoUrl(newUrl);
-            repoUrlDetail.textContent = repoModule.getRepoUrl();
-            toast(getString('msg_repo_url_updated'));
-            repoUrlDialog.close();
-        };
-        repoUrlDialog.show();
+    // Show the primary repo URL, with a "+N more" suffix when the user
+    // has subscribed to multiple repos.
+    const updateDetail = () => {
+        const repos = repoModule.getRepos();
+        if (repos.length === 1) {
+            repoUrlDetail.textContent = repos[0].url;
+        } else {
+            repoUrlDetail.textContent = `${repos[0].name} (+${repos.length - 1} ${getString('repo_more')})`;
+        }
     };
+    updateDetail();
+
+    // The Settings page now opens the multi-repo manager instead of a
+    // single-URL dialog. The legacy dialog is still in the DOM for any
+    // other caller, but no UI surface reaches it.
+    repoItem.onclick = () => repoModule.openRepoManager();
 }
 
 document.addEventListener('DOMContentLoaded', async () => {

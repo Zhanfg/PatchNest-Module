@@ -161,4 +161,12 @@
     <string name="button_later">稍後</string>
     <string name="button_download">下載</string>
     <string name="status_checking">檢查中...</string>
+    <!-- Multi-repo manager -->
+    <string name="title_repo_manager">管理倉庫</string>
+    <string name="button_add_repo">添加倉庫</string>
+    <string name="button_save">保存</string>
+    <string name="repo_official">官方</string>
+    <string name="repo_main">主倉庫</string>
+    <string name="repo_more">更多</string>
+    <string name="repo_placeholder_name">顯示名稱</string>
 </resources>

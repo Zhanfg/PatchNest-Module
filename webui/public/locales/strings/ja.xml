@@ -161,4 +161,12 @@
     <string name="button_later">後で</string>
     <string name="button_download">ダウンロード</string>
     <string name="status_checking">確認中...</string>
+    <!-- Multi-repo manager -->
+    <string name="title_repo_manager">リポジトリ管理</string>
+    <string name="button_add_repo">リポジトリを追加</string>
+    <string name="button_save">保存</string>
+    <string name="repo_official">公式</string>
+    <string name="repo_main">メイン</string>
+    <string name="repo_more">他</string>
+    <string name="repo_placeholder_name">表示名</string>
 </resources>

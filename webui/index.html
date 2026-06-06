@@ -435,6 +435,20 @@
                 <md-filled-button class="confirm" data-i18n="button_ok">OK</md-filled-button>
             </div>
         </md-dialog>
+        <!-- Repository manager (multi-repo) -->
+        <md-dialog id="repo-manager-dialog" class="text-field-dialog">
+            <div slot="headline" data-i18n="title_repo_manager">Manage Repositories</div>
+            <div slot="content">
+                <div id="repo-manager-list"></div>
+                <div class="repo-add-row">
+                    <md-outlined-button class="repo-add" data-i18n="button_add_repo">Add repository</md-outlined-button>
+                </div>
+            </div>
+            <div slot="actions">
+                <md-text-button class="repo-cancel" data-i18n="button_cancel">Cancel</md-text-button>
+                <md-filled-button class="repo-save" data-i18n="button_save">Save</md-filled-button>
+            </div>
+        </md-dialog>
     </div>
 
     <!-- Update notification modal -->

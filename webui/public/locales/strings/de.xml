@@ -161,4 +161,12 @@
     <string name="button_later">Später</string>
     <string name="button_download">Download</string>
     <string name="status_checking">Wird geprüft...</string>
+    <!-- Multi-repo manager -->
+    <string name="title_repo_manager">Repositorys verwalten</string>
+    <string name="button_add_repo">Repository hinzufügen</string>
+    <string name="button_save">Speichern</string>
+    <string name="repo_official">Offiziell</string>
+    <string name="repo_main">Haupt</string>
+    <string name="repo_more">weitere</string>
+    <string name="repo_placeholder_name">Anzeigename</string>
 </resources>

@@ -892,6 +892,32 @@ md-menu-item label {
     border-top: 1px solid var(--md-sys-color-outline-variant, #cac4d0);
 }
 
+.repo-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--md-sys-color-outline-variant, #cac4d0);
+}
+
+.repo-row:last-child { border-bottom: none; }
+
+.repo-add-row {
+    display: flex;
+    justify-content: flex-start;
+    padding-top: 8px;
+}
+
+.tag-repo {
+    background: var(--md-sys-color-tertiary-container, #ffd8e4);
+    color: var(--md-sys-color-on-tertiary-container, #31111d);
+    font-size: 0.72em;
+    padding: 2px 6px;
+    border-radius: 6px;
+    font-weight: 500;
+    align-self: flex-start;
+}
+
 md-dialog [slot="content"] {
     display: flex;
     flex-direction: column;

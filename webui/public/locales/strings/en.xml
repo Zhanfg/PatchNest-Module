@@ -154,6 +154,14 @@
     <string name="button_later">Later</string>
     <string name="button_download">Download</string>
     <string name="status_checking">Checking...</string>
+    <!-- Multi-repo manager -->
+    <string name="title_repo_manager">Manage Repositories</string>
+    <string name="button_add_repo">Add repository</string>
+    <string name="button_save">Save</string>
+    <string name="repo_official">Official</string>
+    <string name="repo_main">Main</string>
+    <string name="repo_more">more</string>
+    <string name="repo_placeholder_name">Display name</string>
     <!-- Exclude list import/export -->
     <string name="button_export">Export</string>
     <string name="button_import">Import</string>

@@ -161,4 +161,12 @@
     <string name="button_later">Sonra</string>
     <string name="button_download">İndir</string>
     <string name="status_checking">Kontrol ediliyor...</string>
+    <!-- Multi-repo manager -->
+    <string name="title_repo_manager">Depoları yönet</string>
+    <string name="button_add_repo">Depo ekle</string>
+    <string name="button_save">Kaydet</string>
+    <string name="repo_official">Resmi</string>
+    <string name="repo_main">Ana</string>
+    <string name="repo_more">daha</string>
+    <string name="repo_placeholder_name">Görüntü adı</string>
 </resources>
