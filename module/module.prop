@@ -7,3 +7,11 @@ description=Standalone implementation of KPM support for Magisk/KernelSU
 updateJson=https://raw.githubusercontent.com/Zhanfg/KPatch-Next-Module/main/update.json
 banner=banner.png
 webuiIcon=banner.png
+# webui path is auto-derived by Magisk/KernelSU: when a user opens
+# the module in their root manager, the manager reads this field
+# and serves ./webroot/ under its own port. The legacy KPatch-Next
+# releases omitted this field; the manager then defaults to serving
+# from the repo root which lands on a black page (no index.html
+# at root). Adding it explicitly fixes the black-page WebUI bug
+# on KernelSU-Next and APatch and keeps Magisk's default behavior.
+webui=webroot

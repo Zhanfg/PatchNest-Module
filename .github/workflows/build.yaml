@@ -548,7 +548,33 @@ jobs:
     - name: Package release artifact
       run: |
         set -euo pipefail
-        cd "$MODULE_NAME" && zip -r "../${MODULE_NAME}.zip" .
+        # The downloaded artifact contents are flat files in the
+        # MODULE_NAME directory (e.g. service.sh, module.prop, bin/,
+        # webroot/, ...). Magisk and KernelSU both expect these files
+        # to live inside a `module/` subdirectory of the zip — the
+        # root manager extracts the zip and looks for `module/module.prop`
+        # (and the WebUI loader looks for `module/webroot/`).
+        #
+        # The original build.sh used `cd module && zip -r ... .` so
+        # the zip itself was just the inner contents; the manager
+        # then unzipped into a directory of its choosing and renamed
+        # it to `module/`. We're reproducing that contract here by
+        # creating a sub-directory `module/` and zipping the
+        # contents of THAT (so the zip's internal layout matches).
+        #
+        # The release job's $MODULE_NAME directory is a workdir; we
+        # create a `module/` subdir inside it, hardlink the actual
+        # module files into it, then zip.
+        cd "$MODULE_NAME"
+        mkdir -p module
+        # Hardlink each top-level file/dir into module/. Using
+        # `find` keeps the trailing directory structure intact
+        # (bin/, webroot/, patch/, etc.).
+        find . -maxdepth 1 -mindepth 1 -not -name 'module' -exec cp -al {} module/ \;
+        cd module
+        # Sanity: confirm module.prop is in the right place.
+        test -f module.prop || { echo '::error::module.prop missing after copy'; exit 1; }
+        zip -r "../${MODULE_NAME}.zip" .
     - name: Generate changelog
       run: |
         CHANGELOG_RAW=$(git diff HEAD~1 HEAD -- "CHANGELOG.md" 2>/dev/null | grep '^+[^+]' | sed 's/^+//' || echo 'No changelog')
