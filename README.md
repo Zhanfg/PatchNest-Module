@@ -1,5 +1,7 @@
 # PatchNest Module
 
+**English** | [中文](README_zh-CN.md)
+
 Standalone implementation of KPM support for Magisk / KernelSU / APatch
 
 ---

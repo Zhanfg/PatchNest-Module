@@ -1,5 +1,7 @@
 # PatchNest Module
 
+**English** | [中文](CHANGELOG_zh-CN.md)
+
 ## Changelog
 
 ### v0.4.1-rc2
