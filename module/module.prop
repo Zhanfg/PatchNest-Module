@@ -5,7 +5,6 @@ versionCode=26
 author=PatchNest Maintainers
 description=PatchNest - KPM host and anti-detection suite for Magisk / KernelSU / APatch
 updateJson=https://raw.githubusercontent.com/Zhanfg/PatchNest-Module/main/update.json
-updateJsonMirror=https://cdn.jsdelivr.net/gh/Zhanfg/PatchNest-Module@main/update.json
 banner=banner.png
 webuiIcon=banner.png
 webui=webroot

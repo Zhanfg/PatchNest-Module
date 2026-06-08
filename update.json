@@ -3,6 +3,6 @@
   "version": "v0.4.1-rc2",
   "zipUrl": "https://github.com/Zhanfg/PatchNest-Module/releases/download/v0.4.1-rc2/PatchNest-Module.zip",
   "changelog": "https://raw.githubusercontent.com/Zhanfg/PatchNest-Module/main/CHANGELOG.md",
-  "zipSha256": "74ee16f850ee8de89c5cfbbb8f05dbb45e0b97bf6075043b621e79b1d23cd064",
+  "zipSha256": "5b7b9ce62ad2e4f66b9bf8d2692cc6f4362f22015d46a7ad9b8845e67d734fe8",
   "_p0_9_note": "P0-9 / ultracode-audit-2026-06-06: zipSha256 is stamped at release time. WebUI update-check (webui/update-check.js) refuses to download if the field is empty/missing (toast: update_unsigned_warning). Hash is the SHA256 of the v0.4.1-rc2 zip asset on GitHub releases. If you re-upload the zip you MUST re-stamp and re-push this file."
 }

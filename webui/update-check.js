@@ -36,81 +36,56 @@ async function getLocalVersion() {
  * changelog} or null on failure. Network errors are non-fatal: the user
  * will simply not see an update notification.
  *
- * Source order:
- *   1. module.prop::updateJson (the authoritative, maintainer-pinned URL).
- *      This is the trust anchor — it points to the same repo the user
- *      cloned from, and the maintainer is responsible for keeping it
- *      pointed at a current commit.
- *   2. module.prop::updateJsonMirror (optional CDN mirror). Used as a
- *      fallback when (1) is slow, blocked, or — as is the case with
- *      raw.githubusercontent.com — stuck behind a long CDN cache. The
- *      mirror URL is the *same* JSON content served from a different
- *      cache layer; the SHA256 in update.json is the integrity anchor
- *      so mirror tampering cannot change what the user installs.
- *      Forks and downstream distributors can repoint this field at
- *      their own CDN; the field is optional and skipped if missing.
+ * Source: module.prop::updateJson — the raw.githubusercontent.com URL.
+ * GitHub's raw CDN caches for 5–15 minutes after a push; during that
+ * window the WebUI may read a stale JSON (e.g. missing the zipSha256
+ * stamp). The unsigned-update warning will fire correctly in that
+ * case. This is the expected behavior for a freshly-pushed release
+ * that the CDN has not yet propagated.
  *
- * We pick the first source that yields a parseable JSON with a
- * non-empty `version`. The two sources are expected to be consistent
- * — both serve the same update.json content — so whichever answers
- * first with valid data wins. If the first source is reachable but
- * is missing the zipSha256 stamp (e.g. mid-rollout), we still
- * accept it and let the WebUI's existing unsigned-update warning
- * kick in; we do NOT fall through to the mirror purely to chase
- * zipSha256, because that would mask real release-engineering bugs.
+ * Alternatives considered:
+ *   • jsdelivr mirror (@main) — caches for 7 days (`max-age=604800`);
+ *     slower than raw, not useful.
+ *   • GitHub API (`api.github.com/contents/...`) — uncacheable but
+ *     rate-limited (60 req/hr unauthenticated) and requires Accept
+ *     header; not viable for a background auto-check.
+ *   • Manual `?t=<timestamp>` cache-busting — unreliable on Android
+ *     WebViews that may strip query parameters.
  */
 async function fetchRemoteInfo() {
-    // Read both URLs from module.prop. Use a single shell call to
-    // avoid two separate exec() roundtrips — `grep -E` picks up both
-    // lines in one read of the file.
+    // Read the updateJson URL from module.prop so we don't hard-code it.
     const urlResult = await exec(
-        `grep -E '^(updateJson|updateJsonMirror)=' ${escapeShell(modDir + '/module.prop')} | cut -d= -f2-`,
+        `grep '^updateJson=' ${escapeShell(modDir + '/module.prop')} | head -1 | cut -d= -f2-`,
         { env: { PATH: `${modDir}/bin` } }
     );
-    if (urlResult.errno !== 0) return null;
-    const lines = (urlResult.stdout || '').split('\n').map(l => l.trim()).filter(Boolean);
-    // Stable order: primary first, mirror second. Even if a user
-    // swaps the field names in module.prop, we still try both.
-    const urls = [lines[0], lines[1]].filter(Boolean);
-    if (urls.length === 0) return null;
+    if (urlResult.errno !== 0 || !urlResult.stdout.trim()) return null;
+    const url = urlResult.stdout.trim();
 
-    const timeout = Math.ceil(FETCH_TIMEOUT_MS / 1000);
+    const result = await exec(
+        `curl -fsL --max-time ${Math.ceil(FETCH_TIMEOUT_MS / 1000)} ${escapeShell(url)}`,
+        { env: { PATH: `${modDir}/bin:/system/bin:$PATH` } }
+    );
+    if (result.errno !== 0 || !result.stdout.trim()) return null;
 
-    for (const url of urls) {
-        // Defence in depth: each URL must be http(s) — same gate as
-        // the zipUrl consumer downstream, applied earlier so a
-        // malicious module.prop can't redirect the update manifest
-        // to a file:// or javascript: sink before sanitizeUrl
-        // catches it.
-        if (!/^https?:\/\//i.test(url)) continue;
-        const r = await exec(
-            `curl -fsL --max-time ${timeout} ${escapeShell(url)}`,
-            { env: { PATH: `${modDir}/bin:/system/bin:$PATH` } }
-        );
-        if (r.errno !== 0 || !r.stdout.trim()) continue;
-        try {
-            const data = JSON.parse(r.stdout);
-            if (typeof data.version !== 'string') continue;
-            return {
-                version: data.version,
-                versionCode: data.versionCode || 0,
-                zipUrl: data.zipUrl || '',
-                changelog: data.changelog || '',
-                // P0-9: SHA256 hash of the release zip. Stamped into
-                // update.json at release time. If the primary source
-                // is reachable but stale (e.g. CDN cache lag), the
-                // mirror source will provide the same JSON with the
-                // hash. We never fall through purely for the hash —
-                // see the function-level comment.
-                zipSha256: data.zipSha256 || '',
-                _source: url,
-            };
-        } catch (_) {
-            // Parse error — try next source.
-            continue;
-        }
+    try {
+        const data = JSON.parse(result.stdout);
+        if (typeof data.version !== 'string') return null;
+        return {
+            version: data.version,
+            versionCode: data.versionCode || 0,
+            zipUrl: data.zipUrl || '',
+            changelog: data.changelog || '',
+            // P0-9: SHA256 hash of the release zip. Stamped into
+            // update.json at release time by the maintainer. If the
+            // raw CDN cache has not yet refreshed, this field will
+            // be empty and the unsigned-update warning fires. The
+            // cache will refresh within 5–15 minutes, after which
+            // the hash will be present.
+            zipSha256: data.zipSha256 || '',
+        };
+    } catch (_) {
+        return null;
     }
-    return null;
 }
 
 /**
