@@ -1,5 +1,5 @@
 // Test: KPM signature policy — verifies the WebUI ↔ shell round-trip
-// for the KPM_SIGNATURE_POLICY setting in /data/adb/kp-next/config.
+// for the KPM_SIGNATURE_POLICY setting in /data/adb/patchnest/config.
 //
 // We don't import the actual index.js here (it would drag in the entire
 // WebUI surface) — we just verify the parsing/formatting invariants that

@@ -1,7 +1,7 @@
 #!/bin/sh
 
-MODDIR="/data/adb/modules/KPatch-Next"
-KPNDIR="/data/adb/kp-next"
+MODDIR="/data/adb/modules/PatchNest"
+PNDIR="/data/adb/patchnest"
 PATH="$MODDIR/bin:$PATH"
 
 PROP_FILE="$MODDIR/module.prop"
@@ -39,9 +39,9 @@ fi
 
 # Detect root manager
 ROOT_MGR="unknown"
-if [ -f "$KPNDIR/root_manager" ]; then
-    # shellcheck disable=SC2086  # $KPNDIR is a controlled constant, but quote anyway
-    ROOT_MGR="$(cat "$KPNDIR/root_manager" 2>/dev/null || true)"
+if [ -f "$PNDIR/root_manager" ]; then
+    # shellcheck disable=SC2086  # $PNDIR is a controlled constant, but quote anyway
+    ROOT_MGR="$(cat "$PNDIR/root_manager" 2>/dev/null || true)"
     _rm_sane="$(printf '%s' "$ROOT_MGR" | tr -cd 'a-z')"
     [ -n "$_rm_sane" ] && ROOT_MGR="$_rm_sane"
 elif [ -n "$APATCH" ]; then

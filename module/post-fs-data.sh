@@ -8,15 +8,15 @@ set -eu
 
 MODDIR=${0%/*}
 SERVICE_D="/data/adb/service.d"
-STATUS_SH="$SERVICE_D/kp-next.sh"
-KPNDIR="/data/adb/kp-next"
-BOOT_COUNT_FILE="$KPNDIR/boot_count"
-AUTORECOVERY_MARKER="$KPNDIR/autorecovery_active"
+STATUS_SH="$SERVICE_D/patchnest.sh"
+PNDIR="/data/adb/patchnest"
+BOOT_COUNT_FILE="$PNDIR/boot_count"
+AUTORECOVERY_MARKER="$PNDIR/autorecovery_active"
 
 # Ensure the directories exist BEFORE trying to write into them.
 # mkdir -p on a missing parent path can otherwise create weird
 # intermediate state if the script is interrupted mid-boot.
-mkdir -p "$SERVICE_D" "$KPNDIR"
+mkdir -p "$SERVICE_D" "$PNDIR"
 cp "$MODDIR/status.sh" "$STATUS_SH"
 chmod 755 "$STATUS_SH"
 
@@ -41,15 +41,15 @@ if [ "$current_count" -ge 3 ] 2>/dev/null; then
     # so we never miss the signal until service.sh clears it.
     touch "$AUTORECOVERY_MARKER"
     # Mark auto-unpatch request for boot_unpatch.sh consumers (e.g. WebUI action).
-    touch "$KPNDIR/auto_unpatch_requested"
+    touch "$PNDIR/auto_unpatch_requested"
 else
     current_count=$((current_count + 1))
     echo "$current_count" > "$BOOT_COUNT_FILE"
     # If we just transitioned into the danger zone this boot, surface it.
     if [ "$current_count" -ge 3 ]; then
         touch "$AUTORECOVERY_MARKER"
-        touch "$KPNDIR/auto_unpatch_requested"
+        touch "$PNDIR/auto_unpatch_requested"
     else
-        rm -f "$AUTORECOVERY_MARKER" "$KPNDIR/auto_unpatch_requested"
+        rm -f "$AUTORECOVERY_MARKER" "$PNDIR/auto_unpatch_requested"
     fi
 fi

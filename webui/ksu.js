@@ -3,7 +3,7 @@
 // KSU-specific paths (profiles, allowlist, module config).
 
 import { exec } from 'kernelsu-alt';
-import { modDir, escapeShell } from './index.js';
+import { modDir, escapeShell } from './constants.js';
 
 // KSU well-known paths.
 const KSU_DIR = '/data/adb/ksu';

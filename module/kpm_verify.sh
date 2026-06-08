@@ -25,7 +25,7 @@
 #   encoded as 64 lowercase hex characters.
 #   The current value is a DEV/TEST key. TODO(security): replace with
 #   a release key managed out-of-band, and consider loading the key
-#   from /data/adb/kp-next/kpm_sign_pubkey instead of hardcoding it.
+#   from /data/adb/patchnest/kpm_sign_pubkey instead of hardcoding it.
 #
 # Tooling:
 #   We use `openssl dgst -ed25519 -verify` (OpenSSL >= 1.1.1). This is
@@ -67,10 +67,10 @@ KPM_SIGN_PUBKEY_HEX="a6cee3371d164daf9ad2ed38ecaf1d492e7867fc6df31f810e69eaa0dd4
 
 # kpm_verify__log <msg>
 # Append a timestamped line to the service log when one is writable.
-# Service.sh sets $KPNDIR and $LOG; we tolerate their absence so that
+# Service.sh sets $PNDIR and $LOG; we tolerate their absence so that
 # this script is safe to source from any context.
 kpm_verify__log() {
-    if [ -n "$LOG" ] && [ -n "$KPNDIR" ] && [ -d "$KPNDIR" ]; then
+    if [ -n "$LOG" ] && [ -n "$PNDIR" ] && [ -d "$PNDIR" ]; then
         printf '[%s] kpm_verify: %s\n' "$(date)" "$1" >> "$LOG" 2>/dev/null
     fi
 }

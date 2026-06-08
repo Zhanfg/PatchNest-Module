@@ -48,8 +48,8 @@
 |----|-----------|------|------|
 | **UC-P1-1** | `module/service.sh:158` | `kpatch kpm load "$kpm" $args` 未 quote + 无 `--` 分隔，args 可被解析为 kpatch 选项 | ✅ 修复（`--` + quote） |
 | **UC-P1-2** | `module/install_kpm.sh:184-192` | `kpatch kpm load "$KPM_DIR/...kpm" "$ARGS_OPT"` 同样未 quote、未 `--` | ✅ 修复 |
-| **UC-P1-3** | `module/service.sh:7` | `REHOOK="$(cat $KPNDIR/rehook ...)"` 未 quote `$KPNDIR` | ✅ 修复 |
-| **UC-P1-4** | `module/service.sh:84` | `cat $KPNDIR/root_manager` 未 quote，root_manager 读后未消毒即赋给 ROOT_MGR | ✅ 修复（`tr -cd 'a-z'` 白名单） |
+| **UC-P1-3** | `module/service.sh:7` | `REHOOK="$(cat $PNDIR/rehook ...)"` 未 quote `$PNDIR` | ✅ 修复 |
+| **UC-P1-4** | `module/service.sh:84` | `cat $PNDIR/root_manager` 未 quote，root_manager 读后未消毒即赋给 ROOT_MGR | ✅ 修复（`tr -cd 'a-z'` 白名单） |
 | **UC-P1-5** | `module/install_kpm.sh:43-47` | `ZIP_FILE` 来自 `install_kpm.sh <path>` CLI arg，无路径消毒 | ✅ 修复（拒绝绝对路径、路径遍历、shell 元字符） |
 | **UC-P1-6** | `module/post-fs-data.sh` | 无 `set -e`，路径未 quote，boot_count 读取无 fd | ✅ 修复（`set -eu` + 全部 quote + `head -c 6` 截断） |
 | **UC-P1-7** | `module.prop` | `version=v0.2.4 / versionCode=19`，CHANGELOG 与 update.json 也未更新 | ✅ 修复 → `v0.3.0-rc6 / 20` |
@@ -162,7 +162,7 @@ const eof = (() => {
 |------|-----|-----|------|
 | `module/kpm_verify.sh` | +25 | -20 | 新生成密钥、probe vector 更新、注释扩展 |
 | `module/install_kpm.sh` | +25 | -3 | MOD_ID 路径遍历修复、MOD_ARGS 二次消毒、ZIP_FILE 拒绝 |
-| `module/service.sh` | +18 | -4 | `$args` 修复、root_manager 消毒、$KPNDIR quote |
+| `module/service.sh` | +18 | -4 | `$args` 修复、root_manager 消毒、$PNDIR quote |
 | `module/post-fs-data.sh` | +10 | -5 | `set -eu`、fd read、head -c 6 截断 |
 | `module/customize.sh` | 0 | 0 | （未修改） |
 | `module/status.sh` | 0 | 0 | （未修改） |

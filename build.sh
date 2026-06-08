@@ -72,8 +72,8 @@ download_assets() {
 
 VERSION_KERNELPATCH=$(get_ver "kernelpatch")
 VERSION_KERNELPATCH="${VERSION_KERNELPATCH:-latest}"
-VERSION_KPATCH_NEXT=$(get_ver "kpatch-next")
-VERSION_KPATCH_NEXT="${VERSION_KPATCH_NEXT:-latest}"
+VERSION_PATCHNEST=$(get_ver "patchnest")
+VERSION_PATCHNEST="${VERSION_PATCHNEST:-latest}"
 VERSION_MAGISKBOOT=$(get_ver "magiskboot")
 VERSION_MAGISKBOOT="${VERSION_MAGISKBOOT:-latest}"
 
@@ -84,10 +84,10 @@ if [[ ! -f "module/bin/kpimg" || ! -f "module/bin/kptools" ]]; then
     mv module/bin/kptools-android module/bin/kptools
 fi
 
-# Fetch kpatch user-space tool from KPatch-Next
-# (kpuser binary only available from KPatch-Next, not KernelPatch)
+# Fetch kpatch user-space tool from PatchNest
+# (kpuser binary only available from PatchNest, not KernelPatch)
 if [[ ! -f "module/bin/kpatch" ]]; then
-    download_assets "KernelSU-Next/KPatch-Next" "$VERSION_KPATCH_NEXT" "module/bin" "kpatch-android"
+    download_assets "Zhanfg/PatchNest" "$VERSION_PATCHNEST" "module/bin" "kpatch-android"
     mv module/bin/kpatch-android module/bin/kpatch
 fi
 
@@ -136,11 +136,11 @@ fi
 
 # Note: the anti-detect KPM suite (module/kpms/*.c) used to be built
 # inline here. As of v0.3.0-rc7, KPMs are no longer built into the
-# Kpatch-Next module. They are distributed via the standalone
+# PatchNest module. They are distributed via the standalone
 # Kpm-Repo at https://github.com/Zhanfg/Kpm-Repo and consumed by
 # the WebUI's KPM Repository page. Users can add custom KPM
 # repositories (including their own forks) without rebuilding the
-# Kpatch-Next module. See Kpm-Repo/README.md for the forker guide.
+# PatchNest module. See Kpm-Repo/README.md for the forker guide.
 #
 # The module/kpms/ source files have been moved to
 # https://github.com/Zhanfg/Kpm-Repo/tree/main/modules.
@@ -150,5 +150,5 @@ commit_number=$(git rev-list --count HEAD)
 commit_hash=$(git rev-parse --short HEAD)
 
 cd module
-zip -r ../out/KPatch-Next-${commit_number}-${commit_hash}.zip .
+zip -r ../out/PatchNest-${commit_number}-${commit_hash}.zip .
 cd ..

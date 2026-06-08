@@ -31,7 +31,7 @@
     <string name="title_binary_source">二进制来源</string>
     <string name="title_select_source">选择二进制来源</string>
     <!-- Buttons -->
-    <string name="button_install">点击安装</string>
+    <string name="button_install">安装</string>
     <string name="button_uninstall">卸载</string>
     <string name="button_embed_kpm">嵌入 KPM</string>
     <string name="button_start">开始</string>
@@ -51,7 +51,7 @@
     <string name="label_system_default">系统默认</string>
     <string name="label_trigger_event">触发事件</string>
     <string name="label_flash_to_device">直接安装</string>
-    <string name="desc_kpatch_next">KernelSU-Next 分支，扩展内核支持 (3.18-6.12)</string>
+    <string name="desc_patchnest">PatchNest 独立实现，扩展内核支持 (3.18-6.12)</string>
     <string name="desc_kernelpatch">原始项目，持续安全更新</string>
     <!-- Status -->
     <string name="status_not_installed">未安装</string>
@@ -81,10 +81,12 @@
     <string name="msg_module_loaded">%1$s 将被加载。</string>
     <string name="msg_unload_module">卸载 %1$s 模块？</string>
     <string name="msg_redirecting_to">正在跳转到 %1$s</string>
-    <string name="msg_failed_open_link">exec 打开链接失败</string>
+    <string name="msg_failed_open_link"><string name="msg_failed_open_link">exec 打开链接失败</string></string>
+    <string name="msg_invalid_link">Invalid link — only http/https URLs are allowed</string>
     <string name="msg_failed_parse_kernel">解析内核失败：</string>
     <string name="msg_boot_extract_failed">提取 Boot 失败</string>
-    <string name="msg_failed_locate_boot">无法定位 Boot 镜像</string>
+    <string name="msg_failed_locate_boot"><string name="msg_failed_locate_boot">无法定位 Boot 镜像</string></string>
+    <string name="msg_failed_unpack_boot">Failed to unpack boot image</string>
     <string name="msg_invalid_kpm_file">无效的 KPM 文件</string>
     <string name="msg_could_not_parse_kpm">无法解析 KPM 信息</string>
     <string name="msg_error_no_boot_image">错误：找不到 Boot 镜像。</string>
@@ -103,7 +105,8 @@
     <string name="msg_no_backups">暂无备份</string>
     <string name="msg_log_cleared">日志已清除</string>
     <string name="msg_backup_saved">备份已保存到下载目录</string>
-    <string name="msg_backup_deleted">备份已删除</string>
+    <string name="msg_backup_deleted"><string name="msg_backup_deleted">备份已删除</string></string>
+    <string name="confirm_delete_backup">Delete backup "%1$s"?</string>
     <string name="msg_source_switched">已切换来源，重启生效</string>
     <string name="msg_source_reboot">* 需要重启才能生效</string>
     <string name="msg_installing_kpm">正在安装 KPM 包...</string>
@@ -167,15 +170,16 @@
     <string name="sig_policy_warn_short">警告</string>
     <string name="sig_policy_strict_short">严格</string>
     <string name="title_unsigned_modules_warning">已加载未签名的 KPM</string>
-    <string name="unsigned_modules_count">%1$d 个模块未签名加载: %2$s。详见 /data/adb/kp-next/unsigned_modules.log</string>
+    <string name="unsigned_modules_count">%1$d 个模块未签名加载: %2$s。详见 /data/adb/patchnest/unsigned_modules.log</string>
     <string name="toast_sig_policy_saved">签名策略已保存,重启后生效</string>
     <string name="update_current">当前已安装: %1</string>
-    <string name="update_hint">KPatch-Next 有新版本可用。点击下载在浏览器中打开发布页面。</string>
+    <string name="update_hint">PatchNest 有新版本可用。点击下载在浏览器中打开发布页面。</string>
     <string name="update_available">%1 可用</string>
     <string name="update_up_to_date">已是最新</string>
     <string name="update_download_started">正在打开下载...</string>
     <string name="update_download_failed">无法打开下载</string>
-    <string name="update_no_url">update.json 中没有下载链接</string>
+    <string name="update_no_url"><string name="update_no_url">update.json 中没有下载链接</string></string>
+    <string name="update_invalid_url">Invalid download URL — only http/https links are accepted</string>
     <string name="update_verify_sha">请校验 SHA-256 开头: %1$s</string>
     <string name="update_unsigned_warning">此更新未签名。为安全起见拒绝自动下载。请手动校验 release 后再安装。</string>
     <string name="button_later">稍后</string>
@@ -245,7 +249,6 @@
     <string name="kpm_updates_available_toast">发现 %1$d 个 KPM 可更新 — 打开 KPM 页面升级</string>
     <string name="title_install_from_url">通过 URL 安装 KPM</string>
     <string name="hint_install_from_url">.kpm 或 .zip 文件直链。建议使用带 SHA256 校验的模块。</string>
-    <string name="button_install">安装</string>
 
       <string name="tag_signed">Signed</string>
       <string name="title_auto_unpatch">Auto-Unpatch Recovery Plan</string>

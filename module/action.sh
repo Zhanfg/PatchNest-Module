@@ -7,7 +7,7 @@ MODDIR=${0%/*}
 # Try KSUWebUIStandalone first (works with all managers)
 if pm path io.github.a13e300.ksuwebui >/dev/null 2>&1; then
     echo "- Launching WebUI in KSUWebUIStandalone..."
-    am start -n "io.github.a13e300.ksuwebui/.WebUIActivity" -e id "KPatch-Next"
+    am start -n "io.github.a13e300.ksuwebui/.WebUIActivity" -e id "PatchNest"
     echo "- WebUI launched successfully."
     exit 0
 fi
@@ -15,7 +15,7 @@ fi
 # KernelSU / ReSukiSU / SukiSU native WebUI
 if pm path me.weishu.kernelsu >/dev/null 2>&1; then
     echo "- Launching via KernelSU..."
-    am start -n "me.weishu.kernelsu/.ui.WebUIActivity" -e id "KPatch-Next"
+    am start -n "me.weishu.kernelsu/.ui.WebUIActivity" -e id "PatchNest"
     echo "- WebUI launched successfully."
     exit 0
 fi
@@ -23,7 +23,7 @@ fi
 # APatch WebUI
 if pm path me.bmax.apatch >/dev/null 2>&1; then
     echo "- Launching via APatch..."
-    am start -n "me.bmax.apatch/.ui.WebUIActivity" -e id "KPatch-Next"
+    am start -n "me.bmax.apatch/.ui.WebUIActivity" -e id "PatchNest"
     echo "- WebUI launched successfully."
     exit 0
 fi

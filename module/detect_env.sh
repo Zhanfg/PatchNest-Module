@@ -3,7 +3,7 @@
 # Root Manager Environment Detection
 # Source this file: . "$MODDIR/detect_env.sh"
 #
-# Sets: ROOT_MGR, HAS_WEBUI, WEBUI_PKG, MODDIR, KPNDIR, KPATCH_BIN, KPATCH_OK
+# Sets: ROOT_MGR, HAS_WEBUI, WEBUI_PKG, MODDIR, PNDIR, KPATCH_BIN, KPATCH_OK
 #
 # Notes:
 #   * All detection functions use `local` so they don't pollute the
@@ -17,8 +17,8 @@
 #     explicitly. (P0-6)
 #
 
-KPNDIR="/data/adb/kp-next"
-MODDIR="${MODDIR:-/data/adb/modules/KPatch-Next}"
+PNDIR="/data/adb/patchnest"
+MODDIR="${MODDIR:-/data/adb/modules/PatchNest}"
 
 # Detect root manager
 detect_root_manager() {

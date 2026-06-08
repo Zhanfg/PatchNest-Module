@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
 
 env:
-  MODULE_NAME: 'KPatch-Next-Module'
+  MODULE_NAME: 'PatchNest-Module'
 
 jobs:
   # ═══ Pre-build tests (run on source code, no downloads needed) ═══
@@ -77,7 +77,7 @@ jobs:
 
     - name: version.properties has required keys
       run: |
-        for key in kpatch-next kernelpatch magiskboot; do
+        for key in patchnest kernelpatch magiskboot; do
           if ! grep -q "^$key=" version.properties; then
             echo "::error::Missing key '$key' in version.properties"
             exit 1
@@ -179,8 +179,8 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        TAG="${{ env['kpatch-next'] }}"
-        ARGS=("-R" "KernelSU-Next/KPatch-Next" "-p" "kpatch-android" "-D" "module/bin")
+        TAG="${{ env['patchnest'] }}"
+        ARGS=("-R" "Zhanfg/PatchNest" "-p" "kpatch-android" "-D" "module/bin")
         if [ "$TAG" != "latest" ]; then gh release download "$TAG" "${ARGS[@]}"; else gh release download "${ARGS[@]}"; fi
         mv module/bin/kpatch-android module/bin/kpatch
 
@@ -217,7 +217,7 @@ jobs:
         }
         check "kpimg-linux"   "${{ env['kernelpatch'] }}" module/bin/kpimg
         check "kptools-android" "${{ env['kernelpatch'] }}" module/bin/kptools
-        check "kpatch-android"  "${{ env['kpatch-next'] }}" module/bin/kpatch
+        check "kpatch-android"  "${{ env['patchnest'] }}" module/bin/kpatch
 
     - name: Verify binary format (ELF64 aarch64)
       run: |
@@ -348,13 +348,13 @@ jobs:
         mv module/bin/kpimg-linux module/bin/kpimg
         mv module/bin/kptools-android module/bin/kptools
 
-    # === kpatch user-space tool (only from KPatch-Next) ===
+    # === kpatch user-space tool (only from PatchNest) ===
     - name: Download kpatch tool
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        TAG="${{ env['kpatch-next'] }}"
-        ARGS=("-R" "KernelSU-Next/KPatch-Next" "-p" "kpatch-android" "-D" "module/bin")
+        TAG="${{ env['patchnest'] }}"
+        ARGS=("-R" "Zhanfg/PatchNest" "-p" "kpatch-android" "-D" "module/bin")
         if [ "$TAG" != "latest" ]; then gh release download "$TAG" "${ARGS[@]}"; else gh release download "${ARGS[@]}"; fi
         mv module/bin/kpatch-android module/bin/kpatch
 
@@ -396,7 +396,7 @@ jobs:
         }
         check "kpimg-linux"   "${{ env['kernelpatch'] }}" module/bin/kpimg
         check "kptools-android" "${{ env['kernelpatch'] }}" module/bin/kptools
-        check "kpatch-android"  "${{ env['kpatch-next'] }}" module/bin/kpatch
+        check "kpatch-android"  "${{ env['patchnest'] }}" module/bin/kpatch
 
     # === Magiskboot ===
     - name: Download magiskboot

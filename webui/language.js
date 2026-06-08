@@ -75,7 +75,7 @@ async function detectUserLanguage() {
         languageNames = availableData;
 
         // Fetch preferred language
-        const prefered_language_code = localStorage.getItem('kp-next_language');
+        const prefered_language_code = localStorage.getItem('patchnest_language');
 
         // Check if preferred language is valid
         if (prefered_language_code && prefered_language_code !== 'default' && availableLanguages.includes(prefered_language_code)) {
@@ -118,7 +118,7 @@ async function detectUserLanguage() {
         }
 
         // 6. Fallback to English
-        localStorage.removeItem('kp-next_language');
+        localStorage.removeItem('patchnest_language');
         return 'en';
     } catch (error) {
         console.error('Error detecting language:', error);
@@ -203,7 +203,7 @@ function applyTranslations() {
  * @returns {void}
  */
 function setLanguage(language) {
-    localStorage.setItem('kp-next_language', language);
+    localStorage.setItem('patchnest_language', language);
     window.location.reload();
 }
 
@@ -219,14 +219,16 @@ async function generateLanguageMenu() {
     const createOption = (lang, name) => {
         const label = document.createElement('label');
         label.className = 'language-option';
+        const safeLang = String(lang).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        const safeName = String(name).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
         label.innerHTML = `
-            <md-radio name="language" value="${lang}"></md-radio>
-            <span>${name}</span>
+            <md-radio name="language" value="${safeLang}"></md-radio>
+            <span>${safeName}</span>
         `;
 
         const radio = label.querySelector('md-radio');
 
-        const currentLang = localStorage.getItem('kp-next_language') || 'default';
+        const currentLang = localStorage.getItem('patchnest_language') || 'default';
         if (currentLang === lang) {
             radio.checked = true;
             document.getElementById('current-language').textContent = name;

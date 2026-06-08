@@ -4,8 +4,14 @@ import { exec, toast } from 'kernelsu-alt';
 import { getString } from './language.js';
 import { sanitizeUrl } from './utils.js';
 
-export const modDir = '/data/adb/modules/KPatch-Next';
-export const persistDir = '/data/adb/kp-next';
+// On-device paths. modDir is the Magisk/KernelSU/APatch mount-point
+// for the active installation of the PatchNest module; persistDir
+// is where the module's runtime state (KPM allowlist, KP
+// signature keys, etc.) lives. /data/adb/paths must match the
+// on-device directory names exactly — they're consumed by the
+// companion shell scripts in module/*.sh.
+export const modDir = '/data/adb/modules/PatchNest';
+export const persistDir = '/data/adb/patchnest';
 
 const DEFAULT_CHUNK_SIZE = 96 * 1024;
 export let MAX_CHUNK_SIZE = DEFAULT_CHUNK_SIZE;

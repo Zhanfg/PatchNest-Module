@@ -26,7 +26,7 @@
       "title": "Path traversal in install_kpm.sh via module.prop id field",
       "file": "module/install_kpm.sh",
       "line": 83,
-      "exploit": "Craft a KPM ZIP whose module.prop has id=../../system/xbin/foo. install_kpm.sh will write the .kpm to /data/adb/kp-next/kpm/../../system/xbin/foo.kpm (root-owned arbitrary file write). Even worse, the script then calls kpatch kpm load on the resulting path — enabling attacker-chosen code to run as root inside the patched kernel.",
+      "exploit": "Craft a KPM ZIP whose module.prop has id=../../system/xbin/foo. install_kpm.sh will write the .kpm to /data/adb/patchnest/kpm/../../system/xbin/foo.kpm (root-owned arbitrary file write). Even worse, the script then calls kpatch kpm load on the resulting path — enabling attacker-chosen code to run as root inside the patched kernel.",
       "fix": "tr -cd allowlist on MOD_ID, MOD_NAME, MOD_VERSION, MOD_AUTHOR, MOD_EVENT; reject empty / '.' / '..' / >64 chars.",
       "fix_commit": "applied in audit-worktree",
       "category": "path-traversal"
@@ -119,11 +119,11 @@
       "id": "UC-P1-3",
       "severity": "P1",
       "confidence": "medium",
-      "title": "Unquoted $KPNDIR in service.sh REHOOK cat",
+      "title": "Unquoted $PNDIR in service.sh REHOOK cat",
       "file": "module/service.sh",
       "line": 7,
-      "exploit": "If $KPNDIR contains a space (custom layout), cat would error out. Doesn't lead to RCE in current paths but is brittle.",
-      "fix": "Quote $KPNDIR.",
+      "exploit": "If $PNDIR contains a space (custom layout), cat would error out. Doesn't lead to RCE in current paths but is brittle.",
+      "fix": "Quote $PNDIR.",
       "fix_commit": "applied in audit-worktree",
       "category": "robustness"
     },
@@ -134,7 +134,7 @@
       "title": "ROOT_MGR read from root_manager file without sanitization",
       "file": "module/service.sh",
       "line": 84,
-      "exploit": "If /data/adb/kp-next/root_manager is tampered with (e.g. via an earlier exploit), an unquoted expansion could affect later `case` statements or log lines.",
+      "exploit": "If /data/adb/patchnest/root_manager is tampered with (e.g. via an earlier exploit), an unquoted expansion could affect later `case` statements or log lines.",
       "fix": "tr -cd 'a-z' whitelist + fallback to 'unknown'.",
       "fix_commit": "applied in audit-worktree",
       "category": "input-validation"

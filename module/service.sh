@@ -1,27 +1,27 @@
 #!/bin/sh
 
 MODDIR=${0%/*}
-KPNDIR="/data/adb/kp-next"
+PNDIR="/data/adb/patchnest"
 PATH="$MODDIR/bin:$PATH"
-CONFIG="$KPNDIR/package_config"
-# P1-fix (ultracode-audit-2026-06-06): quote $KPNDIR. If the path
+CONFIG="$PNDIR/package_config"
+# P1-fix (ultracode-audit-2026-06-06): quote $PNDIR. If the path
 # ever contains a space (custom user layout, su bind-mount trick,
 # or future Magisk layout change) the previous form would word-split
 # into two paths and `cat` would error out — masking the real
 # config. The sanitization of $REHOOK below also defends against
-# a hostile $KPNDIR/rehook file (only off|enable|disable|empty
+# a hostile $PNDIR/rehook file (only off|enable|disable|empty
 # are accepted).
-REHOOK="$(cat "$KPNDIR/rehook" 2>/dev/null || true)"
-LOG="$KPNDIR/service.log"
-KPM_DIR="$KPNDIR/kpm"
-KPM_EVENT_DIR="$KPNDIR/kpm_events"
+REHOOK="$(cat "$PNDIR/rehook" 2>/dev/null || true)"
+LOG="$PNDIR/service.log"
+KPM_DIR="$PNDIR/kpm"
+KPM_EVENT_DIR="$PNDIR/kpm_events"
 
 # Helper: read a key from module.prop
 get_prop() {
     grep "^${1}=" "$2" 2>/dev/null | head -1 | cut -d'=' -f2-
 }
 
-# Read the global Kpatch-Next config file. This is a simple KEY=VALUE
+# Read the global PatchNest config file. This is a simple KEY=VALUE
 # file; we only look at the keys we care about and treat anything else
 # as future work. The file may not exist on first-run / legacy installs;
 # defaults below are chosen to preserve pre-signature behavior.
@@ -39,10 +39,10 @@ get_prop() {
 #            .kpm.sig file. Strictest; use only after all your KPMs
 #            are signed.
 #
-# The policy can be set in /data/adb/kp-next/config, e.g.:
+# The policy can be set in /data/adb/patchnest/config, e.g.:
 #     KPM_SIGNATURE_POLICY=warn
 # or toggled from the WebUI Settings page.
-KPN_CONFIG="$KPNDIR/config"
+KPN_CONFIG="$PNDIR/config"
 KPM_SIGNATURE_POLICY=off
 if [ -f "$KPN_CONFIG" ]; then
     # Tolerate comments, blank lines, and `export ` prefixes.
@@ -72,7 +72,7 @@ esac
 . "$MODDIR/kpm_verify.sh" 2>/dev/null || true
 
 # Rotate log on boot
-mkdir -p "$KPNDIR" "$KPM_DIR/failed" "$KPM_EVENT_DIR"
+mkdir -p "$PNDIR" "$KPM_DIR/failed" "$KPM_EVENT_DIR"
 echo "=== $(date) service.sh started ===" > "$LOG"
 echo "[$(date)] MODDIR=$MODDIR" >> "$LOG"
 echo "[$(date)] PATH=$PATH" >> "$LOG"
@@ -80,16 +80,16 @@ echo "[$(date)] KPM_SIGNATURE_POLICY=$KPM_SIGNATURE_POLICY" >> "$LOG"
 
 # Detect root manager
 ROOT_MGR="unknown"
-if [ -f "$KPNDIR/root_manager" ]; then
-    # P1-fix (ultracode-audit-2026-06-06): quote $KPNDIR in the cat
+if [ -f "$PNDIR/root_manager" ]; then
+    # P1-fix (ultracode-audit-2026-06-06): quote $PNDIR in the cat
     # call, and sanitize the value to a safe character class. The
-    # /data/adb/kp-next/root_manager file is written by customize.sh
+    # /data/adb/patchnest/root_manager file is written by customize.sh
     # (only 'apatch'|'ksu'|'magisk'|'unknown' values), but if a
     # future installer writes a tampered value here, an unquoted
     # expansion could break later `case` statements. The whitelist
     # sanitization prevents the value from containing shell
     # metacharacters that could affect any downstream use.
-    _rm_raw="$(cat "$KPNDIR/root_manager" 2>/dev/null || true)"
+    _rm_raw="$(cat "$PNDIR/root_manager" 2>/dev/null || true)"
     _rm_sane="$(printf '%s' "$_rm_raw" | tr -cd 'a-z')"
     if [ -n "$_rm_sane" ]; then
         ROOT_MGR="$_rm_sane"
@@ -127,8 +127,8 @@ echo "[$(date)] kpatch hello OK" >> "$LOG"
 
 # Bootloop Auto-Recovery: healthy boot detected — reset the counter
 # and clear any auto-recovery markers so we don't trigger unpatch.
-echo "0" > "$KPNDIR/boot_count" 2>/dev/null
-rm -f "$KPNDIR/autorecovery_active" "$KPNDIR/auto_unpatch_requested"
+echo "0" > "$PNDIR/boot_count" 2>/dev/null
+rm -f "$PNDIR/autorecovery_active" "$PNDIR/auto_unpatch_requested"
 
 # Safe KPM load
 # Use a literal-glob test: when the directory is empty, the shell returns
@@ -164,7 +164,7 @@ for kpm in "$KPM_DIR"/*.kpm "$KPM_DIR"/*.ko "$KPM_DIR"/*.o; do
                 # warn mode — allow but flag it
                 echo "[$(date)] WARN (unsigned, policy=$KPM_SIGNATURE_POLICY): $(basename "$kpm") — loading anyway" >> "$LOG"
                 # Write a marker file so the WebUI can surface the warning.
-                echo "unsigned:$(basename "$kpm"):$(date +%s)" >> "$KPNDIR/unsigned_modules.log"
+                echo "unsigned:$(basename "$kpm"):$(date +%s)" >> "$PNDIR/unsigned_modules.log"
             fi
         elif ! verify_kpm_sig "$kpm" "$_kpm_sig"; then
             echo "[$(date)] REJECTED (sig invalid): $(basename "$kpm"), moving to failed/" >> "$LOG"
@@ -185,10 +185,10 @@ done
 # Rehook
 if [ -n "$REHOOK" ]; then
     if [ "$REHOOK" = "enable" ] || [ "$REHOOK" = "disable" ]; then
-        kpatch rehook $REHOOK
+        kpatch rehook "$REHOOK"
         echo "[$(date)] rehook $REHOOK" >> "$LOG"
     else
-        rm -f "$KPNDIR/rehook"
+        rm -f "$PNDIR/rehook"
     fi
 fi
 
@@ -219,7 +219,7 @@ if [ -f "$CONFIG" ]; then
     excluded_count=0
     excluded_failed=0
     # Read into a here-doc, then parse with a manual CSV reader that respects quoting.
-    _cfg_tmp=$(mktemp /data/local/tmp/kpnext_cfg.XXXXXX)
+    _cfg_tmp=$(mktemp /data/local/tmp/patchnest_cfg.XXXXXX)
     tail -n +2 "$CONFIG" > "$_cfg_tmp"
     while IFS= read -r line; do
         [ -z "$line" ] && continue
@@ -231,7 +231,7 @@ if [ -f "$CONFIG" ]; then
         if [ "$exclude" = "1" ] && [ -n "$pkg" ] && [ -n "$uid" ]; then
             # /data/system/packages.list: "<pkg> <uid>"
             pkgq=$(printf '%s' "$pkg" | sed 's/[][\.*^$()+?{|/]/\\&/g')
-            UID_VAL=$(grep -F " $uid" /data/system/packages.list 2>/dev/null | grep -F "^$pkgq " | head -1 | awk '{print $2}')
+            UID_VAL=$(grep -F " $uid" /data/system/packages.list 2>/dev/null | grep "^$pkgq " | head -1 | awk '{print $2}')
             if [ -n "$UID_VAL" ]; then
                 kpatch exclude_set "$UID_VAL" 1
                 excluded_count=$((excluded_count + 1))

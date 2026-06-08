@@ -1,8 +1,8 @@
 {
-  "versionCode": 23,
-  "version": "v0.3.0-rc9",
-  "zipUrl": "https://github.com/Zhanfg/KPatch-Next-Module/releases/download/v0.3.0-rc9/KPatch-Next-Module.zip",
-  "changelog": "https://raw.githubusercontent.com/Zhanfg/KPatch-Next-Module/main/CHANGELOG.md",
+  "versionCode": 25,
+  "version": "v0.4.1-rc1",
+  "zipUrl": "https://github.com/Zhanfg/PatchNest-Module/releases/download/v0.4.1-rc1/PatchNest-Module.zip",
+  "changelog": "https://raw.githubusercontent.com/Zhanfg/PatchNest-Module/main/CHANGELOG.md",
   "_p0_9_note": "P0-9 / ultracode-audit-2026-06-06: zipSha256 is a placeholder. The release CI workflow overwrites this field with the real SHA256 of the .zip at upload time (see .github/workflows/build.yaml::release). The placeholder is intentionally invalid (all-zeros) so that the WebUI update checker refuses to download a release until the CI stamps the real hash. The release will not be published until this field is non-zero — this is enforced by the update-check.js in the WebUI (toast update_unsigned_warning)."
 }
 

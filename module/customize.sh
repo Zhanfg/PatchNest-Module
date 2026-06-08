@@ -1,4 +1,5 @@
-MODDIR="/data/adb/modules/KPatch-Next"
+#!/system/bin/sh
+MODDIR="/data/adb/modules/PatchNest"
 
 # P2-Cluster E fix: defend against an unset/empty $MODDIR which would turn
 # the rm -rf below into a recursive wipe of /. We rely on $MODPATH from
@@ -30,25 +31,25 @@ ui_print "- Architecture: $ARCH"
 
 set_perm_recursive "$MODPATH/bin" 0 2000 0755 0755
 
-mkdir -p /data/adb/kp-next
+mkdir -p /data/adb/patchnest
 
 # Optional system-managed KPM repos override. If the maintainer ships
-# a file at $MODPATH/repos.json in their Kpatch-Next build, copy it
-# to /data/adb/kp-next/repos.json — the WebUI's Kpm-Repo page will
+# a file at $MODPATH/repos.json in their PatchNest build, copy it
+# to /data/adb/patchnest/repos.json — the WebUI's Kpm-Repo page will
 # read this and use it as the canonical repo list instead of the
 # built-in default. Format:
 #   [ { "url": "https://...", "name": "..." }, ... ]
-# This is the cleanest way for a Kpatch-Next fork to ship a non-default
+# This is the cleanest way for a PatchNest fork to ship a non-default
 # default repo (e.g. "always use Acme's Kpm-Repo instead of the
 # official one"). See https://github.com/Zhanfg/Kpm-Repo for details.
 if [ -f "$MODPATH/repos.json" ]; then
-    cp "$MODPATH/repos.json" /data/adb/kp-next/repos.json
+    cp "$MODPATH/repos.json" /data/adb/patchnest/repos.json
     ui_print "- Installed system repos.json"
 fi
 
 # Migrate package_config from APatch if present
-if [ -f "/data/adb/ap/package_config" ] && [ ! -f "/data/adb/kp-next/package_config" ]; then
-    cp "/data/adb/ap/package_config" /data/adb/kp-next/package_config
+if [ -f "/data/adb/ap/package_config" ] && [ ! -f "/data/adb/patchnest/package_config" ]; then
+    cp "/data/adb/ap/package_config" /data/adb/patchnest/package_config
     ui_print "- Migrated APatch package_config"
 fi
 
@@ -65,7 +66,7 @@ if [ ! -x "$MODPATH/bin/kptools" ]; then
 fi
 
 # Save root manager info
-echo "$ROOT_MGR" > /data/adb/kp-next/root_manager
+echo "$ROOT_MGR" > /data/adb/patchnest/root_manager
 
 # backup module.prop
 cp "$MODPATH/module.prop" "$MODPATH/module.prop.bak"
@@ -97,7 +98,7 @@ if [ "$ROOT_MGR" = "magisk" ]; then
     ui_print "     (no native WebUI support in Magisk)"
     ui_print "  3. Open WebUI via Manager → Action button"
 else
-    ui_print "  2. Open WebUI via Manager → KPatch-Next → Action"
+    ui_print "  2. Open WebUI via Manager → PatchNest → Action"
 fi
 ui_print "  4. Click 'Start' to patch kernel"
 ui_print "  5. Reboot again to activate"

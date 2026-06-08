@@ -28,8 +28,11 @@
 
 MODPATH=${0%/*}
 ARCH=$(getprop ro.product.cpu.abi)
-KPNDIR="/data/adb/kp-next"
-BACKUP_DIR="$KPNDIR/backup"
+PNDIR="/data/adb/patchnest"
+BACKUP_DIR="$PNDIR/backup"
+# Caller may set KP_REBACKUP=1 to force re-backing up even when a
+# backup already exists. Default off so an unset var is harmless.
+KP_REBACKUP="${KP_REBACKUP:-0}"
 
 # Load utility functions
 . "$MODPATH/util_functions.sh"
@@ -56,13 +59,13 @@ fi
 if kptools -i kernel -f | grep -q "CONFIG_KPM=y"; then
 	echo "! Patcher has Aborted."
 	echo "! Detected built-in KPM (CONFIG_KPM=y)."
-	echo "! KPatch-Next is not compatible alongside built-in KPM."
+	echo "! PatchNest is not compatible alongside built-in KPM."
 	exit 1
 fi
 
 if [ -z "$(kptools -i kernel -f 2>/dev/null | grep CONFIG_KALLSYMS_ALL=y)" ]; then
 	echo "! Patcher has Aborted."
-	echo "! KPatch-Next requires CONFIG_KALLSYMS_ALL to be Enabled."
+	echo "! PatchNest requires CONFIG_KALLSYMS_ALL to be Enabled."
 	echo "! But your kernel seems NOT enabled it."
 	exit 1
 fi

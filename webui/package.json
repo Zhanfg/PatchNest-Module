@@ -1,7 +1,7 @@
 {
-  "name": "kpatch_next",
+  "name": "patchnest",
   "version": "0.0.1",
-  "description": "KPatch-Next-Module WebUI",
+  "description": "PatchNest-Module WebUI",
   "scripts": {
     "dev": "vite",
     "build": "vite build --emptyOutDir",
@@ -9,11 +9,12 @@
   },
   "keywords": [
     "KernelPatch",
+    "PatchNest",
     "Magisk",
     "KernelSU",
     "WebUI"
   ],
-  "author": "KOWX712",
+  "author": "PatchNest Maintainers",
   "license": "MIT",
   "type": "module",
   "devDependencies": {

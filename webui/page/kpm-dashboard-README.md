@@ -87,14 +87,14 @@ UI is readable in monochrome and by screen readers.
 ## 5. Privacy: what is exposed to user-space
 
 The dashboard reads **only artifacts the supervisor already wrote to
-`/data/adb/kp-next/`** — no new kernel handles, no `/proc/<pid>/` reads.
+`/data/adb/patchnest/`** — no new kernel handles, no `/proc/<pid>/` reads.
 Concretely, the surface area is:
 
 - `kpatch kpm list` — public module list.
-- `/data/adb/kp-next/service.log` — supervisor log.
-- `/data/adb/kp-next/unsigned_modules.log`.
-- `/data/adb/kp-next/kpm_config/<name>.conf` — per-KPM runtime config.
-- `/data/adb/kp-next/kpm/failed/<name>.kpm` — failure blobs.
+- `/data/adb/patchnest/service.log` — supervisor log.
+- `/data/adb/patchnest/unsigned_modules.log`.
+- `/data/adb/patchnest/kpm_config/<name>.conf` — per-KPM runtime config.
+- `/data/adb/patchnest/kpm/failed/<name>.kpm` — failure blobs.
 - `<modDir>/kpms/built/<name>.kpm` last 256 bytes — embedded manifest.
 
 **No PII, no per-process info, no network calls.** Build hash and

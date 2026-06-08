@@ -10,8 +10,8 @@
 SRC_DIR="$1"
 OUTPUT="$2"
 MODDIR="${3:-$(dirname "$0")}"
-KPNDIR="/data/adb/kp-next"
-LOG="$KPNDIR/service.log"
+PNDIR="/data/adb/patchnest"
+LOG="$PNDIR/service.log"
 PATH="$MODDIR/bin:$PATH"
 
 log() {
@@ -54,10 +54,10 @@ fi
 log "Using compiler: $COMPILER"
 
 # KPM header directory
-KPM_INCLUDE="$KPNDIR/include"
+KPM_INCLUDE="$PNDIR/include"
 # P1 fix: mkdir -p on a path that already exists as a symlink would
 # follow the symlink and create the target. A local attacker on the
-# device could pre-stage /data/adb/kp-next/include as a symlink to a
+# device could pre-stage /data/adb/patchnest/include as a symlink to a
 # privileged path; the heredoc `cat > kpmodule.h` would then write
 # into the attacker's chosen target. Verify the path is a real
 # directory before creating anything inside it.
@@ -118,9 +118,9 @@ fi
 # P1 fix: prefer mktemp in a non-shared location and validate.
 # /tmp on Android is often /data/local/tmp (world-writable); a
 # symlink-attack by another uid could pre-create the target dir.
-# Use KPNDIR (owned by root/KSU) as the primary template; fall back
-# to /tmp if mktemp on KPNDIR fails for some reason.
-TMPDIR=$(mktemp -d "$KPNDIR/kpm_build.XXXXXX" 2>/dev/null) || \
+# Use PNDIR (owned by root/KSU) as the primary template; fall back
+# to /tmp if mktemp on PNDIR fails for some reason.
+TMPDIR=$(mktemp -d "$PNDIR/kpm_build.XXXXXX" 2>/dev/null) || \
 TMPDIR=$(mktemp -d /tmp/kpm_build.XXXXXX)
 # P1 fix: use a named cleanup function so the trap string is
 # literal (no expansion at trap-registration time). Without this,
@@ -138,6 +138,11 @@ OBJ_FILE="$TMPDIR/module.o"
 # P1-Cluster B fix: add -fPIC so clang/aarch64 doesn't fail on .kpm
 # relocations. Also keep -O2 so -O0 doesn't make verification slow.
 CFLAGS="-nostdinc -nostdlib -fno-builtin -fno-stack-protector -fPIC -O2 -I$KPM_INCLUDE -I$SRC_DIR"
+
+# Default to failure so any code path that forgets to overwrite
+# compile_rc (e.g. an unsupported compiler) surfaces as an error
+# instead of silently returning 0.
+compile_rc=1
 
 if [ "$COMPILER" = "tcc" ]; then
     # TCC: simple compile to .o

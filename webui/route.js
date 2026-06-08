@@ -77,7 +77,7 @@ function preparePatchUI(title, isUnpatch) {
 }
 
 function navigateToHome() {
-    switchPage('home-page', 'KPatch Next', 'home');
+    switchPage('home-page', 'PatchNest', 'home');
 }
 
 function navigateToKPM() {

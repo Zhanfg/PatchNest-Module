@@ -61,10 +61,12 @@
     <string name="msg_module_loaded">%1$s va être chargé.</string>
     <string name="msg_unload_module">Décharger le module %1$s?</string>
     <string name="msg_redirecting_to">Redirection vers %1$s</string>
-    <string name="msg_failed_open_link">Echec de l'ouverture du lien avec l'éxecutable</string>
+    <string name="msg_failed_open_link"><string name="msg_failed_open_link">Echec de l'ouverture du lien avec l'éxecutable</string></string>
+    <string name="msg_invalid_link">Invalid link — only http/https URLs are allowed</string>
     <string name="msg_failed_parse_kernel">Echec de l'analyse du kernel:</string>
     <string name="msg_boot_extract_failed">L'extraction de l'image boot a échouée</string>
-    <string name="msg_failed_locate_boot">La localisation de l'image boot a échouée</string>
+    <string name="msg_failed_locate_boot"><string name="msg_failed_locate_boot">La localisation de l'image boot a échouée</string></string>
+    <string name="msg_failed_unpack_boot">Failed to unpack boot image</string>
     <string name="msg_invalid_kpm_file">Fichier KPM incorrect</string>
     <string name="msg_could_not_parse_kpm">Analyse des infos du KPM impossible</string>
     <string name="msg_error_no_boot_image">Erreur: Aucune image boot trouvée.</string>
@@ -90,13 +92,14 @@
     <string name="button_save_to_storage">Save to storage</string>
     <string name="button_delete">Delete</string>
     <string name="label_flash_to_device">Flash to Device</string>
-    <string name="desc_kpatch_next">KernelSU-Next fork, extended kernel support (3.18-6.12)</string>
+    <string name="desc_patchnest">Standalone implementation, extended kernel support (3.18-6.12)</string>
     <string name="desc_kernelpatch">Original project, active security updates</string>
     <string name="msg_no_log">No log available</string>
     <string name="msg_no_backups">No backups available</string>
     <string name="msg_log_cleared">Log cleared</string>
     <string name="msg_backup_saved">Backup saved to Download</string>
-    <string name="msg_backup_deleted">Backup deleted</string>
+    <string name="msg_backup_deleted"><string name="msg_backup_deleted">Backup deleted</string></string>
+    <string name="confirm_delete_backup">Delete backup "%1$s"?</string>
     <string name="msg_source_switched">Source switched, reboot to apply</string>
     <string name="msg_source_reboot">* Reboot required to apply</string>
     <string name="msg_installing_kpm">Installing KPM package...</string>
@@ -152,12 +155,13 @@
     <string name="title_check_update">Vérifier les mises à jour</string>
     <string name="update_new_version">Nouvelle version</string>
     <string name="update_current">Actuellement installé : %1</string>
-    <string name="update_hint">Une nouvelle version de KPatch-Next est disponible. Appuyez sur Télécharger pour ouvrir la page de version dans votre navigateur.</string>
+    <string name="update_hint">Une nouvelle version de PatchNest est disponible. Appuyez sur Télécharger pour ouvrir la page de version dans votre navigateur.</string>
     <string name="update_available">%1 disponible</string>
     <string name="update_up_to_date">À jour</string>
     <string name="update_download_started">Ouverture du téléchargement...</string>
     <string name="update_download_failed">Impossible d'ouvrir le téléchargement</string>
-    <string name="update_no_url">Aucune URL de téléchargement dans update.json</string>
+    <string name="update_no_url"><string name="update_no_url">Aucune URL de téléchargement dans update.json</string></string>
+    <string name="update_invalid_url">Invalid download URL — only http/https links are accepted</string>
     <string name="button_later">Plus tard</string>
     <string name="button_download">Télécharger</string>
     <string name="status_checking">Vérification...</string>
@@ -213,7 +217,7 @@
       <string name="sig_policy_warn_short">Warn</string>
       <string name="sig_policy_strict_short">Strict</string>
       <string name="title_unsigned_modules_warning">Unsigned KPM modules loaded</string>
-      <string name="unsigned_modules_count">%1$d module(s) loaded without a signature: %2$s. See /data/adb/kp-next/unsigned_modules.log</string>
+      <string name="unsigned_modules_count">%1$d module(s) loaded without a signature: %2$s. See /data/adb/patchnest/unsigned_modules.log</string>
       <string name="toast_sig_policy_saved">Signature policy saved. Reboot to apply.</string>
       <string name="update_verify_sha">Verify SHA-256 starts with: %1$s</string>
       <string name="update_unsigned_warning">This update is NOT signed. Refusing to download for safety. Please install manually after verifying the release.</string>

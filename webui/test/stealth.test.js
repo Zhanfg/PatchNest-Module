@@ -2,7 +2,7 @@
 // of the WebUI Stealth Center without pulling in the full DOM
 // environment.
 //
-// The actual toggle writes to /data/adb/kp-next/kpm_config/ which we
+// The actual toggle writes to /data/adb/patchnest/kpm_config/ which we
 // mock via a virtual FS stub.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -96,8 +96,8 @@ async function loadModuleWithExec({ queue }) {
     vi.doMock('kernelsu-alt', () => makeExecMock(queue));
     // Stub the other imports the page pulls in.
     vi.doMock('../index.js', () => ({
-        modDir: '/data/adb/modules/KPatch-Next',
-        persistDir: '/data/adb/kp-next',
+        modDir: '/data/adb/modules/PatchNest',
+        persistDir: '/data/adb/patchnest',
         escapeShell: (s) => `'${s.replace(/'/g, "'\\''")}'`,
     }));
     vi.doMock('../language.js', () => ({

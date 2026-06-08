@@ -5,7 +5,7 @@
 
 import { getString } from './language.js';
 
-const THEME_KEY = 'kp-next_theme';
+const THEME_KEY = 'patchnest_theme';
 const VALID_THEMES = ['auto', 'light', 'dark'];
 
 /**

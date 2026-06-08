@@ -27,11 +27,11 @@ import { modDir } from '../index.js';
 import { getString } from '../language.js';
 import { compareVersions } from '../utils.js';
 
-const KPNDIR = '/data/adb/kp-next';
+const PNDIR = '/data/adb/patchnest';
 
 /**
  * Build a map of id -> installed-version for all KPMs currently on the
- * device. Reads each module.prop under $KPNDIR/kpm/<id>/ — the
+ * device. Reads each module.prop under $PNDIR/kpm/<id>/ — the
  * directory layout installed by install_kpm.sh.
  *
  * The KPM module list shown in the WebUI comes from `kpatch kpm list`
@@ -47,11 +47,11 @@ async function readInstalledKpmVersions() {
     // NOTE: keep the `*` glob inside the shell string well clear of
     // any `*\/` sequence — the JSDoc block above this function ends
     // at the first `*\/` it sees, and a literal glob like
-    // `"$KPNDIR\/kpm"\/*\/` would close the comment prematurely.
+    // `"$PNDIR\/kpm"\/*\/` would close the comment prematurely.
     // We use a single-quoted glob with no leading `*\/` instead.
     const result = await exec(
-        `if [ -d "${KPNDIR}/kpm" ]; then
-            for d in ${KPNDIR}/kpm/[!.]*/; do
+        `if [ -d "${PNDIR}/kpm" ]; then
+            for d in ${PNDIR}/kpm/[!.]*/; do
                 [ -f "$d/module.prop" ] || continue
                 mid=$(grep '^id=' "$d/module.prop" | head -1 | cut -d= -f2-)
                 mver=$(grep '^version=' "$d/module.prop" | head -1 | cut -d= -f2-)

@@ -5,29 +5,30 @@ import { setupPullToRefresh } from '../pull-to-refresh.js';
 import { escapeShell } from '../constants.js';
 import { escapeHTML, sanitizeUrl, formatSize } from '../utils.js';
 
-// Default KPM repository URL — points to the standalone Kpm-Repo on the
-// main branch. The Kpm-Repo is an independently-versioned project that
-// owns the KPM catalog (kpm_repo.json + per-module ZIPs). Forks of
-// Kpm-Repo are encouraged — users can add them as additional
-// subscriptions via the WebUI's "Add Repository" button.
-const DEFAULT_REPO_URL = 'https://raw.githubusercontent.com/Zhanfg/Kpm-Repo/main/kpm_repo.json';
-const REPOS_KEY = 'kp-next_repos';
-const SYSTEM_REPOS_PATH = '/data/adb/kp-next/repos.json';
+// Default KPM repository URL — points to the standalone PatchNest-Kpms
+// repo on the main branch. The PatchNest-Kpms repo is the
+// independently-versioned KPM catalog for the PatchNest module.
+// Forks of PatchNest-Kpms are encouraged — users can add them
+// as additional subscriptions via the WebUI's "Add Repository"
+// button.
+const DEFAULT_REPO_URL = 'https://raw.githubusercontent.com/Zhanfg/PatchNest-Kpms/main/kpm_repo.json';
+const REPOS_KEY = 'patchnest_repos';
+const SYSTEM_REPOS_PATH = '/data/adb/patchnest/repos.json';
 
 /**
  * Repo list shape in localStorage:
  *   [{ url: string, name: string }, ...]
  * The first entry is treated as the "primary" repo for display purposes.
- * Legacy kp-next_repo_url (a single string) is migrated on first read.
+ * Legacy patchnest_repo_url (a single string) is migrated on first read.
  */
 let allModules = [];
 let searchQuery = '';
 
 function getRepos() {
-    // System override: if /data/adb/kp-next/repos.json exists, it
+    // System override: if /data/adb/patchnest/repos.json exists, it
     // defines the canonical repo list. This is set by the module
     // maintainer's customize.sh (or a root shell) and is meant for:
-    //   * Custom Kpatch-Next builds that ship a non-default default
+    //   * Custom PatchNest builds that ship a non-default default
     //     repo (e.g. a maintainer who wants to point users at their
     //     own Kpm-Repo fork).
     //   * Sysadmins who pre-configure a fleet of devices with a fixed
@@ -44,11 +45,11 @@ function getRepos() {
     } catch (_) {}
 
     // Migrate the legacy single-URL key if present.
-    const legacy = localStorage.getItem('kp-next_repo_url');
+    const legacy = localStorage.getItem('patchnest_repo_url');
     if (legacy && !localStorage.getItem(REPOS_KEY)) {
         const migrated = [{ url: legacy, name: 'Main' }];
         localStorage.setItem(REPOS_KEY, JSON.stringify(migrated));
-        localStorage.removeItem('kp-next_repo_url');
+        localStorage.removeItem('patchnest_repo_url');
     }
     try {
         const parsed = JSON.parse(localStorage.getItem(REPOS_KEY) || 'null');
@@ -59,9 +60,9 @@ function getRepos() {
 }
 
 /**
- * Try to read /data/adb/kp-next/repos.json from the device. The file
+ * Try to read /data/adb/patchnest/repos.json from the device. The file
  * can be created by the maintainer's customize.sh or by an admin via
- * `sh -c 'echo ... > /data/adb/kp-next/repos.json'`. We try the read
+ * `sh -c 'echo ... > /data/adb/patchnest/repos.json'`. We try the read
  * once at module load (synchronously-blocking is fine — this is a
  * single 100-byte file) and cache the result in window.__systemRepos.
  *
@@ -204,7 +205,7 @@ function renderRepoList() {
         // ships with a .kpm.sig and will be verified by the boot-time
         // service.sh before kpatch kpm load. It does NOT by itself
         // block installation — enforcement is controlled by
-        // REQUIRE_KPM_SIGNATURES in /data/adb/kp-next/config, which the
+        // REQUIRE_KPM_SIGNATURES in /data/adb/patchnest/config, which the
         // WebUI cannot read directly.
         const sigTag = mod.signatureRequired
             ? `<div class="tag tag-signed" title="Signed (Ed25519)">${getString('tag_signed')}</div>`

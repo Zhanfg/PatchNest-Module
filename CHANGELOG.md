@@ -1,12 +1,40 @@
-# KPatch Next Module
+# PatchNest Module
 
 ## Changelog
+
+### v0.4.1-rc2
+
+#### 🔀 Rebrand: KPatch-Next → PatchNest
+- **Project renamed** from "KPatch-Next" to "PatchNest" across 68 files:
+  shell scripts, CI workflows, WebUI (JS/HTML/CSS), 15 locale XMLs,
+  docs, tests, module.prop, update.json, version.properties.
+- **Data directory** changed from `/data/adb/kp-next/` to `/data/adb/patchnest/`.
+- **Binary source** changed from `KernelSU-Next/KPatch-Next` to `Zhanfg/PatchNest`.
+- **Module ID** changed from `KPatch-Next` to `PatchNest`.
+- **Variable names** updated: `KPNDIR` → `PNDIR`, `VERSION_KPATCH_NEXT` → `VERSION_PATCHNEST`.
+
+#### 🔒 Security (post-rename audit)
+- **service.sh exclusion grep** fixed: `grep -F "^$pkgq "` was missing
+  `^` anchoring with `-F` (literal match), replaced with `grep "^$pkgq "`.
+- **boot_unpatch.sh** inverted `patched=` logic corrected.
+- **compile_kpm.sh** uninitialized `compile_rc` variable fixed.
+
+#### ⚡ Robustness
+- **WebView compatibility**: Vite build target changed from `es2022` to
+  `['chrome80', 'es2020']` for Android WebView 80+ support (2020+ devices).
+- **Top-level await** removed from `index.js`; uses dynamic `import().then()`.
+- **4 missing i18n keys** synced across all 15 locales.
+- **CRLF → LF** line endings fixed in all `module/*.sh` scripts.
+
+#### 📦 Build
+- v0.4.1-rc2 zip packaged (1.95 MB, 66/66 validation + 117/117 tests pass).
+- Docker test suite: 41/43 pass (2 expected warnings).
 
 ### v0.3.0-rc7
 
 #### 🔀 Refactor
 - **KPM catalog split into standalone Kpm-Repo**: as of v0.3.0-rc7, the
-  anti-detect KPM suite is no longer built into the Kpatch-Next module.
+  anti-detect KPM suite is no longer built into the PatchNest module.
   Source files (`module/kpms/*.c`) have been moved to
   [Zhanfg/Kpm-Repo](https://github.com/Zhanfg/Kpm-Repo) under
   `modules/<id>/source.c` with paired `module.prop` files. The Kpm-Repo
@@ -15,9 +43,9 @@
   customize, and distribute your own KPM repository.
 - **`DEFAULT_REPO_URL` updated** to point at the new Kpm-Repo:
   `https://raw.githubusercontent.com/Zhanfg/Kpm-Repo/main/kpm_repo.json`
-- **`/data/adb/kp-next/repos.json` system override**: Kpatch-Next now
+- **`/data/adb/patchnest/repos.json` system override**: PatchNest now
   reads this file first (if it exists) as the canonical repo list. This
-  lets a Kpatch-Next fork ship a non-default default repo: drop a
+  lets a PatchNest fork ship a non-default default repo: drop a
   `repos.json` at the module root and `customize.sh` will install it
   on first boot.
 - **WebUI "Add Repository" flow** unchanged — users can still add
@@ -59,7 +87,7 @@
 
 ### v0.2.4
 
-30+ correctness, security, and robustness fixes accumulated since v0.2.2. Highlights below; full list at https://github.com/Zhanfg/KPatch-Next-Module/pull/1
+30+ correctness, security, and robustness fixes accumulated since v0.2.2. Highlights below; full list at https://github.com/Zhanfg/PatchNest-Module/pull/1
 
 #### 🔒 Security
 - **Shell injection** in user-controlled shell commands: `loadModule`, `cp`, `kpm_repo.js` URL, `exclude.js` CSV writer, `backup.js` save path, `index.js` rehook command. All paths now sanitize input and use `escapeShell` / `sanitizeUrl` / single-quoted heredocs.
@@ -106,7 +134,7 @@
 #### Credits
 - APatch boot scripts (vendored, with our patches).
 - bmax121/KernelPatch upstream.
-- KernelSU-Next/KPatch-Next.
+- Zhanfg/PatchNest.
 
 ### v0.2.2
 
@@ -157,7 +185,7 @@
 - **白屏修复**: 5 秒兜底超时 + `kernelsu-alt` 容错
 
 #### 🏗️ 构建与 CI
-- **双二进制源**: kpimg/kptools 来自 KernelPatch-Public，kpatch 来自 KPatch-Next
+- **双二进制源**: kpimg/kptools 来自 KernelPatch-Public，kpatch 来自 PatchNest
 - **CI 测试体系** (7 类 60+ 项检查):
   - ShellCheck + bash 语法检查
   - 配置一致性验证 (module.prop / update.json / version.properties)
@@ -171,7 +199,7 @@
 |------|--------|------|
 | `Zhanfg/KernelPatch` | 私有 | 开发，commit 级版本 |
 | `Zhanfg/KernelPatch-Public` | 公开 | 稳定大版本发布 (0.13.x) |
-| `Zhanfg/KPatch-Next-Module` | 公开 | 模块发布，CI 自动构建 |
+| `Zhanfg/PatchNest-Module` | 公开 | 模块发布，CI 自动构建 |
 
 #### 🔧 Supercall 接口
 | ID | 功能 |

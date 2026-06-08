@@ -6,9 +6,9 @@
 
 MODPATH=${0%/*}
 ARCH=$(getprop ro.product.cpu.abi)
-KPNDIR="/data/adb/kp-next"
-BACKUP_DIR="$KPNDIR/backup"
-AUTORECOVERY_MARKER="$KPNDIR/autorecovery_active"
+PNDIR="/data/adb/patchnest"
+BACKUP_DIR="$PNDIR/backup"
+AUTORECOVERY_MARKER="$PNDIR/autorecovery_active"
 
 # Load utility functions
 . "$MODPATH/util_functions.sh"
@@ -19,7 +19,7 @@ BOOTIMAGE=$1
 # auto_unpatch()
 # Bootloop Auto-Recovery entry point.
 # Flashes back the LATEST backup boot image from
-# /data/adb/kp-next/backup/ to the active boot slot.
+# /data/adb/patchnest/backup/ to the active boot slot.
 # Leaves the autorecovery_active marker in place until a
 # healthy boot clears it (so the WebUI can show the status).
 # Returns 0 on success, non-zero on failure.
@@ -78,7 +78,7 @@ auto_unpatch() {
     # Best-effort cleanup of the counter so we don't immediately
     # re-trigger on the next boot. Keep the marker so the WebUI
     # can show that auto-recovery was activated.
-    echo "0" > "$KPNDIR/boot_count" 2>/dev/null
+    echo "0" > "$PNDIR/boot_count" 2>/dev/null
     echo "- auto_unpatch: flash successful"
     return 0
 }
@@ -100,7 +100,7 @@ if [ $? -ne 0 ]; then
   fi
 fi
 
-if [ -n "$(kptools -i kernel -l 2>/dev/null | grep patched=false)" ]; then
+if [ -n "$(kptools -i kernel -l 2>/dev/null | grep patched=true)" ]; then
 	echo "- kernel has been patched "
   if [ -f "new-boot.img" ]; then
     echo "- found backup boot.img ,use it for recovery"

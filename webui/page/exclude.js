@@ -10,8 +10,8 @@ import fallbackIcon from '../icon.png';
 let allApps = [];
 let showSystemApp = false;
 let searchQuery = '';
-const PROFILES_KEY = 'kp-next_exclude_profiles';
-const ACTIVE_PROFILE_KEY = 'kp-next_exclude_active_profile';
+const PROFILES_KEY = 'patchnest_exclude_profiles';
+const ACTIVE_PROFILE_KEY = 'patchnest_exclude_active_profile';
 
 const iconObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
@@ -79,7 +79,7 @@ async function saveExcludedList(excludedApps) {
     const lines = uniqueList.map(app => `${app.packageName},1,0,${app.uid % 100000}`);
     const csvContent = [header, ...lines].join('\n');
     if (import.meta.env.DEV) {
-        localStorage.setItem('kp-next_excluded_mock', csvContent);
+        localStorage.setItem('patchnest_excluded_mock', csvContent);
         return;
     }
     // Write via a quoted single-quoted heredoc and an explicit printf so a
@@ -101,7 +101,7 @@ async function saveExcludedList(excludedApps) {
         }
         let hex = '';
         for (let i = 0; i < buf.length; i++) hex += buf[i].toString(16).padStart(2, '0');
-        return `__KP_NEXT_EOF_${Date.now().toString(36)}_${hex}__`;
+        return `__PN_EOF_${Date.now().toString(36)}_${hex}__`;
     })();
     await exec(`cat > ${escapeShell(persistDir + '/package_config')} <<'${eof}'\n${csvContent}\n${eof}`);
 }
@@ -113,7 +113,7 @@ async function renderAppList() {
     try {
         let rawContent = '';
         if (import.meta.env.DEV) {
-            rawContent = localStorage.getItem('kp-next_excluded_mock') || '';
+            rawContent = localStorage.getItem('patchnest_excluded_mock') || '';
         } else {
             // Prefer the KSU allowlist when KSU is the active root
             // manager — this is the canonical source of which apps
@@ -392,7 +392,7 @@ async function exportExcludeList() {
         }
         let hex = '';
         for (let i = 0; i < buf.length; i++) hex += buf[i].toString(16).padStart(2, '0');
-        return `__KP_NEXT_EOF_${Date.now().toString(36)}_${hex}__`;
+        return `__PN_EOF_${Date.now().toString(36)}_${hex}__`;
     })();
     const tmp = `${persistDir}/export_exclude.csv`;
     const result = await exec(
@@ -402,7 +402,7 @@ async function exportExcludeList() {
         toast(getString('msg_export_failed'));
         return;
     }
-    const dest = `/storage/emulated/0/Download/kp-next-exclude-${Date.now()}.csv`;
+    const dest = `/storage/emulated/0/Download/patchnest-exclude-${Date.now()}.csv`;
     const cp = await exec(
         `cp ${escapeShell(tmp)} ${escapeShell(dest)} && rm -f ${escapeShell(tmp)}`
     );
@@ -501,10 +501,10 @@ function initExcludePage() {
 
     systemAppCheckbox.addEventListener('change', () => {
         showSystemApp = systemAppCheckbox.checked;
-        localStorage.setItem('kp-next_show_system_app', showSystemApp);
+        localStorage.setItem('patchnest_show_system_app', showSystemApp);
         applyFilters();
     });
-    if (localStorage.getItem('kp-next_show_system_app') === 'true') {
+    if (localStorage.getItem('patchnest_show_system_app') === 'true') {
         showSystemApp = true;
         systemAppCheckbox.checked = true;
     }

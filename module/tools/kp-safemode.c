@@ -2,7 +2,7 @@
 // kp-safemode: minimal helper to query Android safe-mode state via the
 // KernelPatch supercall. Prints "0" or "1" on stdout. Exits 0 on success.
 //
-// Why a separate binary: kpatch (from KernelSU-Next/KPatch-Next) does not
+// Why a separate binary: kpatch (from Zhanfg/PatchNest) does not
 // expose a "safemode" subcommand. SUPERCALL_SU_GET_SAFEMODE (0x1112) is
 // implemented in the kernel side of Zhanfg/KernelPatch-Public (and
 // upstream bmax121/KernelPatch). This helper makes that one supercall

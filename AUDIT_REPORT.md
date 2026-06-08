@@ -324,7 +324,7 @@ getvar KEEPVERITY  # 应输出字面量 $(id)
 
 # 3. CI（P0-3/P0-4/P0-9/P0-10）
 git push && gh workflow run build.yaml
-unzip -l out/KPatch-Next-*.zip | grep kp-safemode  # 应存在
+unzip -l out/PatchNest-*.zip | grep kp-safemode  # 应存在
 jq -r .sha256 update.json  # 应为 64 字符十六进制
 ```
 

@@ -1,7 +1,7 @@
 // Stealth Center — per-KPM toggle controls for the anti-detection suite.
 //
 // Each installed stealth KPM gets a card with a switch. The switch
-// state is persisted to /data/adb/kp-next/kpm_config/<id>.conf so the
+// state is persisted to /data/adb/patchnest/kpm_config/<id>.conf so the
 // next-boot KPM can read its own config. The WebUI does NOT need to
 // re-launch service.sh — the KPMs re-read their config every load.
 
@@ -30,7 +30,7 @@ const STEALTH_IDS = new Set([
 //   enabled = 1   # or 0
 //   hide_paths = ...
 //   ...
-const KPM_CONFIG_DIR = '/data/adb/kp-next/kpm_config';
+const KPM_CONFIG_DIR = '/data/adb/patchnest/kpm_config';
 
 async function getInstalledKpms() {
     // List all .kpm files installed and cross-reference with known

@@ -15,8 +15,8 @@ vi.doMock('kernelsu-alt', () => ({
     exec: vi.fn(async () => ({ errno: 1, stdout: '', stderr: '' })),
 }));
 vi.doMock('../index.js', () => ({
-    modDir: '/data/adb/modules/KPatch-Next',
-    persistDir: '/data/adb/kp-next',
+    modDir: '/data/adb/modules/PatchNest',
+    persistDir: '/data/adb/patchnest',
     escapeShell: (s) => `'${s.replace(/'/g, "'\\''")}'`,
 }));
 

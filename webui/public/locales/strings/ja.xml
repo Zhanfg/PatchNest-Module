@@ -63,10 +63,12 @@
     <string name="msg_module_loaded">%1$s がロードされます。</string>
     <string name="msg_unload_module">%1$s モジュールをアンロードしますか?</string>
     <string name="msg_redirecting_to">%1$s にリダイレクトしています</string>
-    <string name="msg_failed_open_link">実行時にリンクを開けませんでした</string>
+    <string name="msg_failed_open_link"><string name="msg_failed_open_link">実行時にリンクを開けませんでした</string></string>
+    <string name="msg_invalid_link">Invalid link — only http/https URLs are allowed</string>
     <string name="msg_failed_parse_kernel">カーネルの解析に失敗しました:</string>
     <string name="msg_boot_extract_failed">Boot 抽出に失敗しました</string>
-    <string name="msg_failed_locate_boot">Boot イメージが見つかりませんでした</string>
+    <string name="msg_failed_locate_boot"><string name="msg_failed_locate_boot">Boot イメージが見つかりませんでした</string></string>
+    <string name="msg_failed_unpack_boot">Failed to unpack boot image</string>
     <string name="msg_invalid_kpm_file">無効な KPM ファイル</string>
     <string name="msg_could_not_parse_kpm">KPM 情報を解析できませんでした</string>
     <string name="msg_error_no_boot_image">エラー: Boot イメージが見つかりません。</string>
@@ -90,13 +92,14 @@
     <string name="button_save_to_storage">ストレージに保存</string>
     <string name="button_delete">削除</string>
     <string name="label_flash_to_device">デバイスにフラッシュ</string>
-    <string name="desc_kpatch_next">KernelSU-Next フォーク、拡張カーネルサポート (3.18-6.12)</string>
+    <string name="desc_patchnest">スタンドアロン実装、拡張カーネルサポート (3.18-6.12)</string>
     <string name="desc_kernelpatch">オリジナルプロジェクト、積極的なセキュリティ更新</string>
     <string name="msg_no_log">ログなし</string>
     <string name="msg_no_backups">バックアップなし</string>
     <string name="msg_log_cleared">ログをクリアしました</string>
     <string name="msg_backup_saved">バックアップをダウンロードに保存</string>
-    <string name="msg_backup_deleted">バックアップを削除</string>
+    <string name="msg_backup_deleted"><string name="msg_backup_deleted">バックアップを削除</string></string>
+    <string name="confirm_delete_backup">Delete backup "%1$s"?</string>
     <string name="msg_source_switched">ソース切り替え完了、再起動で反映</string>
     <string name="msg_source_reboot">* 再起動が必要です</string>
     <string name="msg_installing_kpm">KPMパッケージをインストール中...</string>
@@ -152,12 +155,13 @@
     <string name="title_check_update">更新を確認</string>
     <string name="update_new_version">新しいバージョン</string>
     <string name="update_current">現在のバージョン: %1</string>
-    <string name="update_hint">KPatch-Next の新しいバージョンが利用可能です。ダウンロードをタップしてブラウザでリリースページを開いてください。</string>
+    <string name="update_hint">PatchNest の新しいバージョンが利用可能です。ダウンロードをタップしてブラウザでリリースページを開いてください。</string>
     <string name="update_available">%1 利用可能</string>
     <string name="update_up_to_date">最新です</string>
     <string name="update_download_started">ダウンロードを開いています...</string>
     <string name="update_download_failed">ダウンロードを開けません</string>
-    <string name="update_no_url">update.json にダウンロード URL がありません</string>
+    <string name="update_no_url"><string name="update_no_url">update.json にダウンロード URL がありません</string></string>
+    <string name="update_invalid_url">Invalid download URL — only http/https links are accepted</string>
     <string name="button_later">後で</string>
     <string name="button_download">ダウンロード</string>
     <string name="status_checking">確認中...</string>
@@ -213,7 +217,7 @@
       <string name="sig_policy_warn_short">Warn</string>
       <string name="sig_policy_strict_short">Strict</string>
       <string name="title_unsigned_modules_warning">Unsigned KPM modules loaded</string>
-      <string name="unsigned_modules_count">%1$d module(s) loaded without a signature: %2$s. See /data/adb/kp-next/unsigned_modules.log</string>
+      <string name="unsigned_modules_count">%1$d module(s) loaded without a signature: %2$s. See /data/adb/patchnest/unsigned_modules.log</string>
       <string name="toast_sig_policy_saved">Signature policy saved. Reboot to apply.</string>
       <string name="update_verify_sha">Verify SHA-256 starts with: %1$s</string>
       <string name="update_unsigned_warning">This update is NOT signed. Refusing to download for safety. Please install manually after verifying the release.</string>

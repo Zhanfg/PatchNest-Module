@@ -7,3 +7,9 @@
 .audit/
 webui/.gstack/
 webui/screenshots/
+.gstack/
+.remember/
+android_kernel_oneplus_sdm845-lineage-23.0-4.19.tar.gz
+verify_webui.sh
+webui_full.png
+webui_screenshot.png

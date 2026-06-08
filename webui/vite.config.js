@@ -23,6 +23,10 @@ export default defineConfig(({ mode }) => ({
     base: './',
     build: {
         outDir: '../module/webroot',
+        // Support Android WebView 80+ (Chrome 80+). This covers most
+        // devices from 2020 onwards. Top-level await is avoided in
+        // index.js by using dynamic import().then() instead.
+        target: ['chrome80', 'es2020'],
     },
     plugins: [
         createHtmlPlugin({ minify: true }),

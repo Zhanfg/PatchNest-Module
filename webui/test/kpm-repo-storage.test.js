@@ -21,8 +21,8 @@ vi.mock('kernelsu-alt', () => ({
 }));
 
 vi.mock('../index.js', () => ({
-    modDir: '/data/adb/modules/kpatch_next',
-    persistDir: '/data/adb/kp-next',
+    modDir: '/data/adb/modules/PatchNest',
+    persistDir: '/data/adb/patchnest',
 }));
 
 vi.mock('../language.js', () => ({
@@ -47,8 +47,8 @@ vi.mock('../utils.js', async () => {
 const { getRepos, setRepos } = await import('../page/kpm_repo.js');
 
 // The localStorage key used by kpm_repo.js (verified by reading the source).
-const REPOS_KEY = 'kp-next_repos';
-const DEFAULT_URL = 'https://raw.githubusercontent.com/Zhanfg/KPatch-Next-Module/main/kpm_repo.json';
+const REPOS_KEY = 'patchnest_repos';
+const DEFAULT_URL = 'https://raw.githubusercontent.com/Zhanfg/PatchNest-Kpms/main/kpm_repo.json';
 
 describe('getRepos / setRepos — localStorage round-trip', () => {
     it('returns the default repo when localStorage is empty (first run)', () => {

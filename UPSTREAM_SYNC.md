@@ -25,7 +25,7 @@
 
 上游 dev commit `ec82432` 是 `bmax121/KernelPatch` 的 kptools 改动(从 `-S <superkey>` 改为 `-s <superkey>`)。
 
-但 **我们的 kptools 来自 `KernelSU-Next/KPatch-Next`**(不是 `bmax121/KernelPatch`)。KPatch-Next 的 kptools CLI 用法:
+但 **我们的 kptools 来自 `Zhanfg/PatchNest`**(不是 `bmax121/KernelPatch`)。PatchNest 的 kptools CLI 用法:
 
 ```c
 optstr = "hvpurdfli:k:o:a:M:E:T:N:V:A:"

@@ -89,9 +89,9 @@ gh api 'repos/bmax121/KernelPatch/compare/main...dev' --jq '.commits[].message'
   - 是重构? → 评估冲突成本,通常跳过
 - [ ] 如果要打新 tag(如 0.13.4),先在 `version` 文件更新
 
-## 与 KPatch-Next-Module 的关系
+## 与 PatchNest-Module 的关系
 
-`Zhanfg/KPatch-Next-Module` 通过以下方式使用本仓库的产物:
+`Zhanfg/PatchNest-Module` 通过以下方式使用本仓库的产物:
 
 | 用途 | 文件 | 引用方式 |
 |---|---|---|
@@ -99,7 +99,7 @@ gh api 'repos/bmax121/KernelPatch/compare/main...dev' --jq '.commits[].message'
 | `kptools` | 用户态管理工具 | 同上,模式 `kptools-android` |
 | 版本号 | `kernelpatch=0.13.3` | `version.properties` |
 
-打新 tag 后,`KPatch-Next-Module` 这边要:
+打新 tag 后,`PatchNest-Module` 这边要:
 1. 更新 `version.properties` 的 `kernelpatch=`
 2. 触发 CI(`workflow_dispatch`)
 3. 验证 `validate_module.js` 通过

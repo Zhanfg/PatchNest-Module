@@ -31,9 +31,12 @@ vi.mock('kernelsu-alt', () => ({
     }),
 }));
 
-vi.mock('../index.js', () => ({
-    modDir: '/data/adb/modules/kpatch_next',
-    persistDir: '/data/adb/kp-next',
+// FIX: ksu.js now imports modDir/escapeShell from constants.js, not
+// the index.js barrel. Mock the canonical source.
+vi.mock('../constants.js', () => ({
+    modDir: '/data/adb/modules/PatchNest',
+    persistDir: '/data/adb/patchnest',
+    escapeShell: (s) => `'${String(s).replace(/'/g, `'\\''`)}'`,
 }));
 
 // SUT — imported *after* mocks are registered.

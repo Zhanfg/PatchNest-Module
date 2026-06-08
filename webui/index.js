@@ -23,15 +23,19 @@ applyStoredTheme();
 })();
 
 let exec, toast;
-try {
-    const ks = await import('kernelsu-alt');
-    exec = ks.exec;
-    toast = ks.toast;
-} catch (e) {
-    console.error('kernelsu-alt not available:', e);
-    exec = async () => ({ errno: -1, stdout: '', stderr: 'kernelsu-alt not available' });
-    toast = (msg) => console.warn('toast:', msg);
-}
+
+// Initialize kernelsu-alt synchronously (no top-level await) for
+// compatibility with older WebViews (Chrome < 89).
+import('kernelsu-alt')
+    .then(ks => {
+        exec = ks.exec;
+        toast = ks.toast;
+    })
+    .catch(e => {
+        console.error('kernelsu-alt not available:', e);
+        exec = async () => ({ errno: -1, stdout: '', stderr: 'kernelsu-alt not available' });
+        toast = (msg) => console.warn('toast:', msg);
+    });
 
 import { setupRoute } from './route.js';
 import { getString, loadTranslations } from './language.js';
@@ -167,7 +171,7 @@ function initKsuIntegration() {
             // android.intent.action.VIEW -d
             // kernelsu://module/<module-id>
             // The manager package provides the activity.
-            const moduleId = 'KPatch-Next';
+            const moduleId = 'PatchNest';
             exec(
                 `am start -a android.intent.action.VIEW -d kernelsu://module/${moduleId} -p ${env.managerPackage}`,
                 { env: { PATH: '/system/bin' } }
@@ -252,12 +256,12 @@ function setRehookMode(isEnable) {
 //             pre-v0.3.0 behavior, lets users load / embed their own
 //             unsigned KPMs without any friction).
 //   warn    — load everything, but log a warning to service.log AND
-//             append to /data/adb/kp-next/unsigned_modules.log. The
+//             append to /data/adb/patchnest/unsigned_modules.log. The
 //             WebUI shows a visible "Unsigned modules loaded" warning
 //             row in Settings so the user is aware.
 //   strict  — refuse to load any KPM that lacks a valid .kpm.sig.
 //
-// Policy is persisted to /data/adb/kp-next/config and read by
+// Policy is persisted to /data/adb/patchnest/config and read by
 // service.sh on every boot. The WebUI never relies on a localStorage
 // mirror because service.sh is the source of truth.
 
@@ -268,7 +272,7 @@ async function initSignaturePolicy() {
     if (!select || _sigPolicyLoaded) return;
     _sigPolicyLoaded = true;
 
-    // Read the current policy from /data/adb/kp-next/config on disk.
+    // Read the current policy from /data/adb/patchnest/config on disk.
     // The shell helper we call is intentionally permissive: it returns
     // 'off' on any error, never throws.
     let current = 'off';

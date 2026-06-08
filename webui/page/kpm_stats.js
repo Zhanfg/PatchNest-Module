@@ -2,9 +2,9 @@
 //
 // Data sources:
 //   - /proc/modules                       (size, state)
-//   - /data/adb/kp-next/service.log       (lastEvent, filterCount, errorCount)
-//   - /data/adb/kp-next/kpm_config/*.conf (enabled flag)
-//   - tail of /data/adb/kp-next/kpm/*.kpm (build manifest JSON at EOF)
+//   - /data/adb/patchnest/service.log       (lastEvent, filterCount, errorCount)
+//   - /data/adb/patchnest/kpm_config/*.conf (enabled flag)
+//   - tail of /data/adb/patchnest/kpm/*.kpm (build manifest JSON at EOF)
 //
 // Public API:
 //   getKpmRuntimeStats(name) -> stats object

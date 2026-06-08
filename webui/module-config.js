@@ -15,7 +15,7 @@ import { getString } from './language.js';
 import { supportsProfiles } from './ksu.js';
 import { escapeHTML } from './utils.js';
 
-const MODULE_ID = 'KPatch-Next';
+const MODULE_ID = 'PatchNest';
 
 /**
  * Read a single config value by key. Returns the string value or null
@@ -92,8 +92,16 @@ export async function openModuleConfigDialog() {
         return;
     }
 
-    const dialog = document.getElementById('module-config-dialog');
-    if (!dialog) return;
+    // FIX (ultracode-audit 2026-06-07): #module-config-dialog never
+    // existed in index.html — the function silently returned. Reuse
+    // the existing #control-dialog the same way save/load-profile
+    // flows do (it has the same slots).
+    const dialog = document.getElementById('control-dialog') || document.getElementById('module-config-dialog');
+    if (!dialog) {
+        // Fall back to a toast — UI affordance for this rare path.
+        toast(getString('msg_no_config'));
+        return;
+    }
 
     // Reuse the existing control-dialog pattern. Toggle its visibility
     // by changing headline + content + buttons. This keeps the DOM

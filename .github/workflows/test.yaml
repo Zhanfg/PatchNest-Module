@@ -123,7 +123,7 @@ jobs:
 
     - name: Verify version.properties has required keys
       run: |
-        for key in kpatch-next kernelpatch magiskboot; do
+        for key in patchnest kernelpatch magiskboot; do
           if ! grep -q "^$key=" version.properties; then
             echo "::error::Missing key '$key' in version.properties"
             exit 1

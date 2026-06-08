@@ -412,8 +412,8 @@ function testCrossReferences() {
     const uninstallSh = path.join(MODULE_DIR, 'uninstall.sh');
     if (fs.existsSync(uninstallSh)) {
         const content = fs.readFileSync(uninstallSh, 'utf8');
-        if (content.includes('kp-next')) {
-            ok('uninstall.sh cleans kp-next data');
+        if (content.includes('patchnest')) {
+            ok('uninstall.sh cleans PatchNest data');
         } else {
             warn('uninstall.sh may not clean all data');
         }

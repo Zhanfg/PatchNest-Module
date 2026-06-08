@@ -22,11 +22,11 @@
 #
 
 MODDIR=${0%/*}
-KPNDIR="/data/adb/kp-next"
-KPM_DIR="$KPNDIR/kpm"
-KPM_ZIP_DIR="$KPNDIR/kpm_zips"
-KPM_EVENT_DIR="$KPNDIR/kpm_events"
-LOG="$KPNDIR/service.log"
+PNDIR="/data/adb/patchnest"
+KPM_DIR="$PNDIR/kpm"
+KPM_ZIP_DIR="$PNDIR/kpm_zips"
+KPM_EVENT_DIR="$PNDIR/kpm_events"
+LOG="$PNDIR/service.log"
 PATH="$MODDIR/bin:$PATH"
 
 log() {
@@ -204,9 +204,9 @@ elif [ -n "$SRC_FILES" ]; then
         log "Source module compiled and installed"
     else
         # No compiler available, store source for later compilation
-        mkdir -p "$KPNDIR/kpm_src"
-        cp -r "$TMPDIR"/* "$KPNDIR/kpm_src/${MOD_ID}/"
-        log "Source module stored (no compiler available): $KPNDIR/kpm_src/${MOD_ID}/"
+        mkdir -p "$PNDIR/kpm_src"
+        cp -r "$TMPDIR"/* "$PNDIR/kpm_src/${MOD_ID}/"
+        log "Source module stored (no compiler available): $PNDIR/kpm_src/${MOD_ID}/"
         echo "- Source stored, compilation requires TCC compiler"
     fi
     # NOTE: source-compiled modules are inherently unsigned in this MVP.

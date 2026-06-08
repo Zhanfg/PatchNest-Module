@@ -351,7 +351,7 @@ flash_image() {
 save_image_to_storage() {
   local IMAGE=$1
   local DATE=$(date +%y%m%d%H%M)
-  local FILENAME="kpatch_next_patched_$DATE.img"
+  local FILENAME="patchnest_patched_$DATE.img"
   local OUT="/storage/emulated/0/Download/$FILENAME"
 
   cp -f "$IMAGE" "$OUT"
