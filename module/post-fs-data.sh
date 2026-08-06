@@ -23,6 +23,7 @@ KPM_QUARANTINE_DIR="$PNDIR/kpm_quarantine"
 KPM_FAILED_DIR="$KPM_DIR/failed"
 KPM_ADMISSION_LOG="$PNDIR/kpm_admission.log"
 THRESHOLD=3
+POLICY_READY=true
 
 mkdir -p "$SERVICE_D" "$PNDIR" "$KPM_DIR" "$KPM_EVENT_DIR" "$KPM_QUARANTINE_DIR" "$KPM_FAILED_DIR"
 chmod 0700 "$PNDIR" "$KPM_DIR" "$KPM_EVENT_DIR" "$KPM_QUARANTINE_DIR" "$KPM_FAILED_DIR" 2>/dev/null || true
@@ -58,6 +59,7 @@ normalize_signature_policy() {
   chmod 0600 "$_config_tmp" 2>/dev/null || true
   mv "$_config_tmp" "$CONFIG_FILE" || { rm -f "$_config_tmp"; return 1; }
   admission_log "missing/invalid signature policy replaced with strict"
+  return 0
 }
 
 move_with_sidecars() {
@@ -84,7 +86,10 @@ move_with_sidecars() {
   return 0
 }
 
-normalize_signature_policy || admission_log "ERROR: could not enforce a valid signature policy"
+if ! normalize_signature_policy; then
+  POLICY_READY=false
+  admission_log "ERROR: signature policy could not be repaired; all KPMs will be quarantined"
+fi
 
 # service.sh historically scans every .kpm/.ko/.o in KPM_DIR. Enforce the
 # intended admission decision before that broad loop executes.
@@ -97,7 +102,10 @@ done
 for _kpm in "$KPM_DIR"/*.kpm; do
   [ -e "$_kpm" ] || continue
   _name=$(basename "$_kpm" .kpm)
-  if [ ! -f "$KPM_EVENT_DIR/${_name}.autoload" ]; then
+  if [ "$POLICY_READY" != "true" ]; then
+    admission_log "quarantined KPM because signature policy is unavailable: ${_name}.kpm"
+    move_with_sidecars "$_kpm" "$KPM_QUARANTINE_DIR" || admission_log "failed to quarantine: $_kpm"
+  elif [ ! -f "$KPM_EVENT_DIR/${_name}.autoload" ]; then
     admission_log "quarantined non-autoload KPM: ${_name}.kpm"
     move_with_sidecars "$_kpm" "$KPM_QUARANTINE_DIR" || admission_log "failed to quarantine: $_kpm"
   fi
