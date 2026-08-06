@@ -158,8 +158,17 @@ for _module_dir in \
   } >"$OUTPUT_DIR/module${_label}.txt"
 done
 
-BACKUP_ROOT=/data/adb/patchnest/backups
-if [ -d "$BACKUP_ROOT" ]; then
+# Current releases use `backup`; accept the early development plural form only
+# as a read-only compatibility source when it exists.
+BACKUP_ROOT=""
+for _candidate_root in /data/adb/patchnest/backup /data/adb/patchnest/backups; do
+  if [ -d "$_candidate_root" ]; then
+    BACKUP_ROOT=$_candidate_root
+    break
+  fi
+done
+if [ -n "$BACKUP_ROOT" ]; then
+  echo "backup_root=$BACKUP_ROOT" >"$OUTPUT_DIR/backup-root.txt"
   mkdir -p "$OUTPUT_DIR/backup-manifests"
   find "$BACKUP_ROOT" -maxdepth 1 -type f -name 'boot_backup_*.json' -print 2>/dev/null \
     | sort \
@@ -170,6 +179,8 @@ if [ -d "$BACKUP_ROOT" ]; then
       done
   find "$BACKUP_ROOT" -maxdepth 1 -type f -name 'boot_backup_*.img' -exec ls -l {} \; 2>/dev/null \
     >"$OUTPUT_DIR/backup-images-list.txt" || true
+else
+  echo "backup_root=not_found" >"$OUTPUT_DIR/backup-root.txt"
 fi
 
 if $HASH_BOOT; then
