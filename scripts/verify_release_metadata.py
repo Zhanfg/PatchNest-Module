@@ -103,9 +103,10 @@ def verify(root: Path, release_asset: Path | None = None) -> list[str]:
                 errors.append(f"missing or invalid trusted digest: {digest_key}")
 
     required_build_tokens = [
-        'download_release_asset \\\n    Zhanfg/KernelPatch-Public',
-        'download_release_asset \\\n    Zhanfg/PatchNest',
-        'download_release_asset \\\n    topjohnwu/Magisk',
+        "download_release_asset",
+        "Zhanfg/KernelPatch-Public",
+        "Zhanfg/PatchNest",
+        "topjohnwu/Magisk",
         "sha256sum -c - >&2",
         "pnpm install --frozen-lockfile",
         "SOURCE_DATE_EPOCH",
