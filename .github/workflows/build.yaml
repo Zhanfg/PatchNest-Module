@@ -12,9 +12,6 @@ on:
     paths-ignore: ['**.md']
   workflow_dispatch:
 
-env:
-  MODULE_NAME: PatchNest-Module
-
 jobs:
   validate:
     name: Source and WebUI validation
@@ -59,30 +56,29 @@ jobs:
             exit 1
           }
           case "$json_version" in
-            v*) echo "::error::Internal version must not include the Git tag v prefix"; exit 1 ;;
+            v*) echo "::error::Internal version must not include v prefix"; exit 1 ;;
           esac
           case "$zip_url" in
             */releases/download/v"$json_version"/*) ;;
             *) echo "::error::zipUrl must target tag v$json_version"; exit 1 ;;
           esac
           printf '%s' "$zip_sha" | grep -Eq '^[0-9a-f]{64}$' || {
-            echo "::error::zipSha256 must be 64 lowercase hexadecimal characters"
+            echo "::error::zipSha256 must contain 64 lowercase hexadecimal characters"
             exit 1
           }
 
           for key in patchnest kernelpatch magiskboot; do
-            grep -q "^${key}=" version.properties || {
+            grep -Fq "${key}=" version.properties || {
               echo "::error::Missing version key: $key"
               exit 1
             }
           done
-
           for key in \
             kpimg_linux_0.13.3 \
             kptools_android_0.13.3 \
             kpatch_android_0.13.5-2 \
             magisk_apk_v30.7; do
-            value=$(sed -n "s/^${key}=//p" version.properties)
+            value=$(grep -F "${key}=" version.properties | head -n 1 | cut -d= -f2-)
             printf '%s' "$value" | grep -Eq '^[0-9a-f]{64}$' || {
               echo "::error::Missing or invalid SHA256 pin: $key"
               exit 1
@@ -144,7 +140,6 @@ jobs:
     outputs:
       release_tag: ${{ steps.release_meta.outputs.tag }}
       should_release: ${{ steps.release_meta.outputs.should_release }}
-      package_sha256: ${{ steps.package.outputs.sha256 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -155,7 +150,6 @@ jobs:
         uses: nttld/setup-ndk@ed92fe6cadad69be94a966a7ee3271275e62f779
         with:
           ndk-version: r26d
-          log: error
 
       - name: Setup pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
@@ -176,9 +170,12 @@ jobs:
 
       - name: Load dependency versions
         run: |
-          grep -v '^#' version.properties \
-            | sed -e '/^[[:space:]]*$/d' -e 's/ *= */=/' -e 's/"//g' \
-            >> "$GITHUB_ENV"
+          set -euo pipefail
+          for key in patchnest kernelpatch magiskboot; do
+            value=$(grep -F "${key}=" version.properties | head -n 1 | cut -d= -f2- | tr -d '"')
+            [ -n "$value" ] || { echo "::error::Missing $key"; exit 1; }
+            echo "$key=$value" >> "$GITHUB_ENV"
+          done
 
       - name: Download pinned binary dependencies
         env:
@@ -198,22 +195,27 @@ jobs:
 
       - name: Verify dependency SHA256
         run: |
-          set -euo pipefail
-          get_prop() {
+          set -uo pipefail
+          fail=0
+          get_pin() {
             grep -F "$1=" version.properties | head -n 1 | cut -d= -f2- | tr -d '"'
           }
           verify() {
-            expected=$(get_prop "$1")
-            [ -n "$expected" ] || {
-              echo "::error::No SHA256 pin for $1"
-              exit 1
-            }
-            echo "$expected  $2" | sha256sum -c -
+            key="$1"
+            file="$2"
+            expected=$(get_pin "$key")
+            actual=$(sha256sum "$file" | awk '{print $1}')
+            echo "::notice title=$key SHA256::$actual"
+            if [ "$actual" != "$expected" ]; then
+              echo "::error::$key mismatch: expected=$expected actual=$actual"
+              fail=1
+            fi
           }
           verify "kpimg_linux_${kernelpatch}" module/bin/kpimg-linux
           verify "kptools_android_${kernelpatch}" module/bin/kptools-android
           verify "kpatch_android_${patchnest}" module/bin/kpatch-android
           verify "magisk_apk_${magiskboot}" magisk.apk
+          exit "$fail"
 
       - name: Prepare module binaries
         run: |
@@ -258,15 +260,12 @@ jobs:
         run: node tests/validate_module.js
 
       - name: Package module
-        id: package
         run: |
           set -euo pipefail
           mkdir -p out
           (cd module && zip -qr ../out/PatchNest-Module.zip .)
           test -s out/PatchNest-Module.zip
-          sha=$(sha256sum out/PatchNest-Module.zip | awk '{print $1}')
-          echo "$sha  out/PatchNest-Module.zip" > out/PatchNest-Module.zip.sha256
-          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
+          sha256sum out/PatchNest-Module.zip > out/PatchNest-Module.zip.sha256
           unzip -l out/PatchNest-Module.zip | grep -q 'module.prop'
           unzip -l out/PatchNest-Module.zip | grep -q 'webroot/index.html'
 
@@ -325,7 +324,6 @@ jobs:
             echo "::error::Package SHA256 $actual does not match update.json $expected"
             exit 1
           }
-          echo "$actual  out/PatchNest-Module.zip" | sha256sum -c -
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
