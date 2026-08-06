@@ -22,7 +22,7 @@ if [[ $# -gt 0 ]]; then
     exit 2
 fi
 
-for command_name in bash curl git jq pnpm sha256sum unzip zip find sort touch stat; do
+for command_name in bash curl git jq pnpm python3 sha256sum unzip zip find sort touch stat; do
     command -v "$command_name" >/dev/null 2>&1 || {
         echo "ERROR: required command not found: $command_name" >&2
         exit 1
@@ -99,7 +99,7 @@ download_release_asset() {
 
     mkdir -p "$output_directory"
     local destination="$output_directory/$asset_name"
-    echo "Downloading $asset_name"
+    echo "Downloading $asset_name" >&2
     curl --fail --location --silent --show-error \
         --retry 3 --retry-delay 2 "$download_url" -o "$destination"
     [[ -s "$destination" ]] || {
@@ -109,7 +109,7 @@ download_release_asset() {
 
     digest_key=$(asset_digest_key "$asset_name" "$tag")
     digest=$(expected_digest "$digest_key")
-    printf '%s  %s\n' "$digest" "$destination" | sha256sum -c -
+    printf '%s  %s\n' "$digest" "$destination" | sha256sum -c - >&2
     printf '%s\n' "$destination"
 }
 
@@ -128,21 +128,17 @@ VERSION_MAGISKBOOT=$(get_value version.properties magiskboot)
     exit 1
 }
 
-# Validate metadata before spending time on dependency downloads.
 python3 scripts/verify_release_metadata.py --root "$ROOT"
 
 rm -rf "$OUT_DIR" "$BIN_DIR" "$WEBROOT_DIR"
 mkdir -p "$OUT_DIR" "$BIN_DIR" "$WEBROOT_DIR"
 
-# Build the WebUI strictly from the committed lockfile.
 (
     cd webui
     pnpm install --frozen-lockfile
     pnpm build --emptyOutDir
 )
 
-# Download every executable from its immutable release on every build. This
-# avoids silently trusting stale or locally replaced module/bin files.
 KPIMG_ASSET=$(download_release_asset \
     Zhanfg/KernelPatch-Public "$VERSION_KERNELPATCH" "$BIN_DIR" 'kpimg-linux')
 KPTOOLS_ASSET=$(download_release_asset \
@@ -167,8 +163,6 @@ fi
 rm -f "$MAGISK_APK"
 chmod 0755 "$BIN_DIR/kpimg" "$BIN_DIR/kptools" "$BIN_DIR/kpatch" "$BIN_DIR/magiskboot"
 
-# Build kp-safemode only from a specifically provided NDK. Its absence is
-# explicit in the provenance manifest rather than silently changing the ZIP.
 KPSAFEMODE_STATUS=absent
 if [[ -n "${ANDROID_NDK_HOME:-}" ]]; then
     NDK_CLANG="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
@@ -186,8 +180,6 @@ if [[ -n "${ANDROID_NDK_HOME:-}" ]]; then
     KPSAFEMODE_STATUS=built
 fi
 
-# Build in a staging directory so source mtimes and local filesystem ordering
-# cannot change the archive. SOURCE_DATE_EPOCH defaults to the source commit.
 SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git show -s --format=%ct HEAD)}
 [[ "$SOURCE_DATE_EPOCH" =~ ^[0-9]+$ ]] || {
     echo "ERROR: SOURCE_DATE_EPOCH must be an integer" >&2
@@ -229,7 +221,6 @@ cat >"$OUT_DIR/build-provenance.json" <<EOF
 }
 EOF
 
-# Confirm the archive contains only the staged module and no build workspace.
 if unzip -Z1 "$ARCHIVE" | grep -Eq '(^|/)(\.git|node_modules|audit-output|out)(/|$)'; then
     echo "ERROR: package contains build-only files" >&2
     exit 1
