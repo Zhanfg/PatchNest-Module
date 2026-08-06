@@ -1,0 +1,55 @@
+name: Replay boot safety source changes
+
+on:
+  push:
+    branches:
+      - restart/boot-safety-audit
+    paths:
+      - .github/workflows/replay-boot-safety-source.yml
+
+permissions:
+  contents: write
+
+jobs:
+  replay:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: restart/boot-safety-audit
+
+      - name: Extract and replay validated transformation
+        run: |
+          set -euo pipefail
+          awk '
+            /^          python3 - <<'"'"'PY'"'"'$/ { capture=1; next }
+            /^          PY$/ { if (capture) exit }
+            capture { sub(/^          /, ""); print }
+          ' .github/workflows/apply-boot-safety.yml > /tmp/apply_boot_safety.py
+          test -s /tmp/apply_boot_safety.py
+          python3 /tmp/apply_boot_safety.py
+
+      - name: Keep workflow files outside the source commit
+        run: |
+          set -euo pipefail
+          git checkout -- .github/workflows/build.yaml
+          git status --short
+
+      - name: Validate generated source changes
+        run: |
+          set -euo pipefail
+          bash -n module/patch/util_functions.sh
+          bash -n module/patch/boot_patch.sh
+          bash -n module/patch/boot_unpatch.sh
+          node tests/validate_boot_safety.js
+
+      - name: Commit only source tests and documentation
+        run: |
+          set -euo pipefail
+          git config user.name patchnest-boot-safety-bot
+          git config user.email patchnest-boot-safety-bot@users.noreply.github.com
+          git add module/patch tests/validate_boot_safety.js docs/restart/BOOT_SAFETY_AUDIT.md
+          git diff --cached --check
+          git commit -m "fix(boot): make backup flash and recovery fail closed"
+          git push origin HEAD:restart/boot-safety-audit
