@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""Repository-level contracts for PatchNest boot hardening.
-
-Run from any directory:
-
-    python3 tests/validate_boot_hardening.py
-
-No device, root permission, network, or GitHub Actions runner is required.
-"""
+"""Repository-level contracts for PatchNest boot hardening."""
 
 from __future__ import annotations
 
@@ -42,6 +35,7 @@ def require_regex(text: str, pattern: str, message: str) -> None:
 
 def main() -> int:
     guard = read("module/patch/flash_guard.sh")
+    target = read("module/patch/boot_target.sh")
     patch = read("module/patch/boot_patch.sh")
     unpatch = read("module/patch/boot_unpatch.sh")
     extract = read("module/patch/boot_extract.sh")
@@ -55,8 +49,14 @@ def main() -> int:
     }.items():
         require(script, '. "$MODPATH/flash_guard.sh"', f"{script_name} does not source flash_guard.sh")
 
+    require(extract, '. "$MODPATH/boot_target.sh"', "boot discovery does not load the boot-only resolver")
+    require(extract, "find_kernel_boot_image", "boot discovery still calls the broad upstream resolver")
+    require(target, "find_kernel_boot_image", "boot-only discovery helper is missing")
+    require(target, "assert_kernel_boot_target", "boot-only discovery does not validate its result")
     for forbidden in ("vendor_boot", "init_boot"):
         require(guard, forbidden, f"flash guard does not explicitly reject {forbidden}")
+        if re.search(rf"(?m)^[^#\n]*find_block[^\n]*\b{forbidden}\b", target):
+            raise AssertionError(f"boot-only resolver searches forbidden partition {forbidden}")
 
     require(guard, "PARTNAME=", "partition validation does not inspect sysfs PARTNAME")
     require(guard, "verify_block_image_prefix", "readback verification helper missing")
@@ -83,6 +83,8 @@ def main() -> int:
     reject(patch, "set -x", "boot patcher enables shell tracing and may expose a superkey")
     reject(patch, "(proceeding)", "unverified embedded KPMs still proceed")
 
+    require(unpatch, "FLASH_TO_DEVICE=${2:-true}", "unpatch lacks an explicit file-only mode")
+    require(unpatch, "Successfully unpatched; image saved without flashing", "file-only unpatch does not preserve a verified output")
     require(unpatch, "rm -f kernel kernel.ori new-boot.img", "stale work artifacts are not removed")
     require(unpatch, "select_verified_backup", "verified backup selection helper missing")
     require(unpatch, "partition_name_for_target", "recovery target comparison does not use the logical partition name")
@@ -95,9 +97,6 @@ def main() -> int:
     reject(unpatch, "found backup boot.img", "stale new-boot.img recovery branch remains")
     reject(unpatch, "if ! flash_image", "negated flash command can hide the original error code")
 
-    require(extract, "assert_kernel_boot_target", "boot discovery result is not checked")
-    require(extract, "Discovered partition is not a supported KernelPatch boot target", "invalid target error is missing")
-
     require(post_fs, '"automatic_flash_performed": false', "early-boot state incorrectly claims a restore occurred")
     require(post_fs, '"required_next_step": "select_target_bound_verified_backup"', "recovery request lacks its required verification step")
     reject(post_fs, "flash_image", "post-fs-data must not write a boot block device")
@@ -105,7 +104,6 @@ def main() -> int:
     require(collector, "/data/adb/patchnest/backup", "evidence collector ignores the current backup directory")
     require(collector, "No block device was written", "collector lacks an explicit read-only sharing notice")
 
-    # Guard against accidental reintroduction of minute-only backup names.
     if re.search(r"date \+%[yY][^\n]*%M(?![^\n]*%S)", patch):
         raise AssertionError("minute-only backup timestamp reintroduced")
 
