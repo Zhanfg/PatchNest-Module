@@ -2,9 +2,8 @@
 # PatchNest early-boot state and KPM admission preparation.
 #
 # This script never flashes or restores a boot image. Before service.sh runs,
-# it ensures only explicitly autoload-enabled `.kpm` files remain in the live
-# KPM directory. Disabled/unsigned-review modules are preserved in quarantine;
-# Linux `.ko/.o` objects are preserved under failed/ for manual inspection.
+# it narrows the live KPM directory to explicitly autoload-enabled `.kpm`
+# files and guarantees a valid signature-policy value.
 
 set -eu
 umask 077
@@ -13,6 +12,7 @@ MODDIR=${0%/*}
 SERVICE_D=/data/adb/service.d
 STATUS_SH="$SERVICE_D/patchnest.sh"
 PNDIR=/data/adb/patchnest
+CONFIG_FILE="$PNDIR/config"
 BOOT_COUNT_FILE="$PNDIR/boot_count"
 RECOVERY_MARKER="$PNDIR/autorecovery_active"
 RECOVERY_REQUEST="$PNDIR/auto_unpatch_requested"
@@ -32,6 +32,32 @@ fi
 
 admission_log() {
   printf '[%s] %s\n' "$(date)" "$*" >>"$KPM_ADMISSION_LOG" 2>/dev/null || true
+}
+
+normalize_signature_policy() {
+  _policy=""
+  if [ -f "$CONFIG_FILE" ]; then
+    _policy=$(sed -n 's/^KPM_SIGNATURE_POLICY=//p' "$CONFIG_FILE" 2>/dev/null | tail -n 1 | tr -d ' \t\r\n')
+  fi
+  case "$_policy" in
+    off|warn|strict)
+      admission_log "signature policy preserved: $_policy"
+      return 0
+      ;;
+  esac
+
+  _config_tmp="${CONFIG_FILE}.tmp.$$"
+  if [ -f "$CONFIG_FILE" ]; then
+    awk 'index($0, "KPM_SIGNATURE_POLICY=") != 1 { print }' "$CONFIG_FILE" >"$_config_tmp" \
+      || { rm -f "$_config_tmp"; return 1; }
+  else
+    : >"$_config_tmp" || return 1
+  fi
+  printf '%s\n' 'KPM_SIGNATURE_POLICY=strict' >>"$_config_tmp" \
+    || { rm -f "$_config_tmp"; return 1; }
+  chmod 0600 "$_config_tmp" 2>/dev/null || true
+  mv "$_config_tmp" "$CONFIG_FILE" || { rm -f "$_config_tmp"; return 1; }
+  admission_log "missing/invalid signature policy replaced with strict"
 }
 
 move_with_sidecars() {
@@ -57,6 +83,8 @@ move_with_sidecars() {
   done
   return 0
 }
+
+normalize_signature_policy || admission_log "ERROR: could not enforce a valid signature policy"
 
 # service.sh historically scans every .kpm/.ko/.o in KPM_DIR. Enforce the
 # intended admission decision before that broad loop executes.
