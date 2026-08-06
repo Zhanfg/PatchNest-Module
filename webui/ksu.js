@@ -1,34 +1,53 @@
-// KSU environment detection. Detects the running root manager (KernelSU,
-// KernelSU-Next, APatch, Magisk) and exposes helper functions for reading
-// KSU-specific paths (profiles, allowlist, module config).
+// KSU environment detection and constrained profile access.
 
 import { exec } from 'kernelsu-alt';
 import { modDir, escapeShell } from './constants.js';
 
-// KSU well-known paths.
 const KSU_DIR = '/data/adb/ksu';
-const KSU_PROFILES_DIR = '/data/adb/ksu/profile';
 const KSU_ALLOWLIST = '/data/adb/ksu/.allowlist';
-const KSU_MODULE_CONFIG = '/data/adb/ksu/module_config';
 
-// KernelSU manager package names (checked in order).
 const KSU_PACKAGES = [
-    'me.weishu.kernelsu',        // KernelSU-Next (standard)
-    'io.github.kernelsu',        // KernelSU (original)
-    'com.rifsxd.sukisuultra',    // SukiSU-Ultra
-    'com.rifsxd.sukisu',         // ReSukiSU
+    'me.weishu.kernelsu',
+    'io.github.kernelsu',
+    'com.rifsxd.sukisuultra',
+    'com.rifsxd.sukisu',
 ];
 
 let _env = null;
 
 /**
- * Detect the running environment once and cache it.
- * Returns {manager, hasKsu, ksuVersion, managerPackage}.
- * manager: 'ksu' | 'ksu-next' | 'sukisu' | 'apatch' | 'magisk' | 'unknown'
- * hasKsu: boolean — true when KSU APIs are actually available
- * ksuVersion: string | null — KSU kernel version (e.g. '1.0.4')
- * managerPackage: string | null — package name of the KSU manager
+ * Normalize a ksuctl profile target without allowing option injection.
+ *
+ * Accepted forms:
+ * - decimal Android UID in the signed 32-bit positive range;
+ * - an Android-style package identifier, limited to 255 ASCII characters.
+ *
+ * Returns a canonical string or null. A quoted string beginning with `-` is
+ * still an option after shell parsing, so shell escaping alone is insufficient.
  */
+export function normalizeKsuProfileTarget(value) {
+    if (value === null || value === undefined) return null;
+    const input = String(value).trim();
+    if (!input || input.length > 255) return null;
+
+    if (/^[0-9]{1,10}$/.test(input)) {
+        const uid = Number(input);
+        if (Number.isSafeInteger(uid) && uid >= 0 && uid <= 2147483647) {
+            return String(uid);
+        }
+        return null;
+    }
+
+    // Android package names are dot-separated Java-like identifiers. This
+    // deliberately rejects whitespace, slashes, colons, shell metacharacters,
+    // leading dashes and single-segment aliases.
+    if (/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/.test(input)) {
+        return input;
+    }
+    return null;
+}
+
+/** Detect and cache the active root-manager environment. */
 export async function detectEnvironment() {
     if (_env) return _env;
 
@@ -40,8 +59,6 @@ export async function detectEnvironment() {
         moduleEnabled: true,
     };
 
-    // 1. Check KSU root daemon. `ksu --version` returns the KSU version
-    //    string if installed and working. This is the most reliable marker.
     try {
         const ver = await exec('ksu --version', { env: { PATH: `${modDir}/bin` } });
         if (ver.errno === 0 && ver.stdout.trim()) {
@@ -51,9 +68,6 @@ export async function detectEnvironment() {
         }
     } catch (_) {}
 
-    // 2. If `ksu` isn't available, check the /data/adb/ksu directory
-    //    (this is more permissive — works even if the user hasn't
-    //    re-rooted yet after flashing KSU).
     if (!result.hasKsu) {
         try {
             const ls = await exec(`ls ${escapeShell(KSU_DIR)} 2>/dev/null`, { env: { PATH: '/system/bin' } });
@@ -64,7 +78,6 @@ export async function detectEnvironment() {
         } catch (_) {}
     }
 
-    // 3. Detect the KSU manager package (for launching its UI).
     if (result.hasKsu) {
         for (const pkg of KSU_PACKAGES) {
             try {
@@ -84,27 +97,20 @@ export async function detectEnvironment() {
         }
     }
 
-    // 4. Detect APatch (separate root manager with similar capabilities).
     if (result.manager === 'unknown') {
         try {
             const ap = await exec('ls /data/adb/ap 2>/dev/null', { env: { PATH: '/system/bin' } });
-            if (ap.errno === 0 && ap.stdout.trim()) {
-                result.manager = 'apatch';
-            }
+            if (ap.errno === 0 && ap.stdout.trim()) result.manager = 'apatch';
         } catch (_) {}
     }
 
-    // 5. Detect Magisk.
     if (result.manager === 'unknown') {
         try {
             const magisk = await exec('magisk --version', { env: { PATH: '/system/bin' } });
-            if (magisk.errno === 0 && magisk.stdout.trim()) {
-                result.manager = 'magisk';
-            }
+            if (magisk.errno === 0 && magisk.stdout.trim()) result.manager = 'magisk';
         } catch (_) {}
     }
 
-    // 6. Check module enabled state (KSU sets this via its module system).
     if (result.hasKsu) {
         try {
             const en = await exec(`cat ${escapeShell(modDir)}/disable 2>/dev/null`, { env: { PATH: '/system/bin' } });
@@ -116,62 +122,50 @@ export async function detectEnvironment() {
     return result;
 }
 
-/**
- * Force re-detection (used after a reboot or manager update).
- */
 export function resetEnvironment() {
     _env = null;
 }
 
-/**
- * Read the list of apps that have been granted root access via KSU's
- * allowlist. Returns a Set of UIDs. For non-KSU environments, returns
- * an empty set.
- */
 export async function readKsuAllowlist() {
     try {
         const result = await exec(`cat ${escapeShell(KSU_ALLOWLIST)}`, { env: { PATH: '/system/bin' } });
         if (result.errno !== 0) return new Set();
         return new Set(
             result.stdout.split(/\s+/)
-                .map(l => l.trim())
+                .map(line => line.trim())
                 .filter(Boolean)
                 .map(Number)
-                .filter(uid => !isNaN(uid))
+                .filter(uid => Number.isSafeInteger(uid) && uid >= 0 && uid <= 2147483647)
         );
     } catch (_) {
         return new Set();
     }
 }
 
-/**
- * Read a KSU App Profile for a given package. Returns the profile
- * object or null if not found. Only works when KSU is the root manager.
- *
- * KSU profiles are stored as binary blobs in /data/adb/ksu/profile/<uid>.
- * We can also use `ksuctl profile get <uid>` if available.
- */
+/** Read one KSU App Profile after strict target validation. */
 export async function readKsuProfile(pkgOrUid) {
+    const target = normalizeKsuProfileTarget(pkgOrUid);
+    if (target === null) return null;
+
     try {
-        const result = await exec(`ksuctl profile get ${escapeShell(pkgOrUid)}`, {
+        const result = await exec(`ksuctl profile get ${escapeShell(target)}`, {
             env: { PATH: `${modDir}/bin:/system/bin` }
         });
         if (result.errno !== 0 || !result.stdout.trim()) return null;
-        try { return JSON.parse(result.stdout); } catch (_) { return null; }
+        try {
+            const parsed = JSON.parse(result.stdout);
+            return parsed && typeof parsed === 'object' ? parsed : null;
+        } catch (_) {
+            return null;
+        }
     } catch (_) {
         return null;
     }
 }
 
-/**
- * Detect whether this KSU supports the enhanced features (App Profile,
- * module config). Returns true for KSU ≥ v2.0.0 (the version that
- * added profiles).
- */
 export function supportsProfiles(env) {
-    if (!env.hasKsu) return false;
-    if (!env.ksuVersion) return false;
-    const v = env.ksuVersion.match(/(\d+)\.(\d+)/);
-    if (!v) return false;
-    return parseInt(v[1]) >= 2;
+    if (!env?.hasKsu || !env.ksuVersion) return false;
+    const version = String(env.ksuVersion).match(/(\d+)\.(\d+)/);
+    if (!version) return false;
+    return Number.parseInt(version[1], 10) >= 2;
 }
