@@ -2,8 +2,12 @@
 /module/webroot
 /module/bin
 /out
+/audit-output
+/PatchNest_Evidence_*
 *.zip
 *.log
+*.pyc
+__pycache__/
 *_log.tar.gz
 *_logs.tar.gz
 C*Temp*.tar.gz
