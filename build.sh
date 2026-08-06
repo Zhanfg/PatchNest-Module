@@ -11,12 +11,18 @@ mkdir -p out module/bin module/webroot
 
 # Build WebUI.
 cd webui
-pnpm build || { pnpm install && pnpm build; }
+pnpm build || { pnpm install --frozen-lockfile && pnpm build; }
 cd ..
 
-# Read versions and digests from version.properties.
+# Read versions and digests from version.properties using literal keys.
 get_ver() {
-    [ -f version.properties ] && grep "^$1[[:space:]]*=" version.properties | cut -d'=' -f2 | xargs | sed 's/^"//;s/"$//'
+    local key="$1"
+    [ -f version.properties ] || return 1
+    grep -F "${key}=" version.properties \
+        | head -n 1 \
+        | cut -d= -f2- \
+        | xargs \
+        | sed 's/^"//;s/"$//'
 }
 
 asset_digest_key() {
