@@ -88,4 +88,33 @@ describe('getRepos / setRepos — localStorage round-trip', () => {
         const repos = getRepos();
         expect(repos[0].url).toBe(DEFAULT_URL);
     });
+
+
+    it('migrates the retired single Kpm-Repo URL to PatchNest-Kpms', () => {
+        localStorage.setItem(
+            'patchnest_repo_url',
+            'https://raw.githubusercontent.com/Zhanfg/Kpm-Repo/main/kpm_repo.json',
+        );
+        const repos = getRepos();
+        expect(repos).toEqual([{ url: DEFAULT_URL, name: 'repo_official' }]);
+        expect(localStorage.getItem('patchnest_repo_url')).toBeNull();
+        expect(JSON.parse(localStorage.getItem(REPOS_KEY))).toEqual(repos);
+    });
+
+    it('repairs retired URLs already stored in the multi-repo list', () => {
+        localStorage.setItem(REPOS_KEY, JSON.stringify([
+            {
+                url: 'https://raw.githubusercontent.com/Zhanfg/Kpm-Repo/main/kpm_repo.json',
+                name: 'Old main',
+            },
+            { url: DEFAULT_URL, name: 'Duplicate official' },
+            { url: 'https://example.com/custom.json', name: 'Custom' },
+        ]));
+        const repos = getRepos();
+        expect(repos).toEqual([
+            { url: DEFAULT_URL, name: 'repo_official' },
+            { url: 'https://example.com/custom.json', name: 'Custom' },
+        ]);
+        expect(JSON.parse(localStorage.getItem(REPOS_KEY))).toEqual(repos);
+    });
 });
