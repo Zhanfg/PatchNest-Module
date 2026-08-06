@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Verify PatchNest release metadata without network access.
-
-The verifier checks the relationship between module/module.prop, update.json,
-version.properties, and build.sh. An optional local ZIP can be supplied to
-confirm its SHA-256 matches update.json.
-"""
+"""Verify PatchNest release metadata without network access."""
 
 from __future__ import annotations
 
@@ -85,8 +80,7 @@ def verify(root: Path, release_asset: Path | None = None) -> list[str]:
     if not HEX64.fullmatch(zip_sha):
         errors.append("update.json zipSha256 must be 64 lowercase hex characters")
 
-    update_json_url = module_prop.get("updateJson", "")
-    if update_json_url != "https://raw.githubusercontent.com/Zhanfg/PatchNest-Module/main/update.json":
+    if module_prop.get("updateJson") != "https://raw.githubusercontent.com/Zhanfg/PatchNest-Module/main/update.json":
         errors.append("module.prop updateJson must point to the main-branch update.json")
     if update.get("changelog") != "https://raw.githubusercontent.com/Zhanfg/PatchNest-Module/main/CHANGELOG.md":
         errors.append("update.json changelog must point to main/CHANGELOG.md")
@@ -105,16 +99,18 @@ def verify(root: Path, release_asset: Path | None = None) -> list[str]:
             errors.append(f"{version_key} must not use mutable latest")
         for prefix in digest_prefixes:
             digest_key = f"{prefix}_{version}"
-            digest = versions.get(digest_key, "")
-            if not HEX64.fullmatch(digest):
+            if not HEX64.fullmatch(versions.get(digest_key, "")):
                 errors.append(f"missing or invalid trusted digest: {digest_key}")
 
     required_build_tokens = [
-        'download_assets "Zhanfg/KernelPatch-Public"',
-        'download_assets "Zhanfg/PatchNest"',
-        'download_assets "topjohnwu/Magisk"',
-        "sha256sum -c -",
+        'download_release_asset \\\n    Zhanfg/KernelPatch-Public',
+        'download_release_asset \\\n    Zhanfg/PatchNest',
+        'download_release_asset \\\n    topjohnwu/Magisk',
+        "sha256sum -c - >&2",
         "pnpm install --frozen-lockfile",
+        "SOURCE_DATE_EPOCH",
+        "zip -X -q",
+        "build-provenance.json",
     ]
     for token in required_build_tokens:
         if token not in build:
@@ -122,6 +118,8 @@ def verify(root: Path, release_asset: Path | None = None) -> list[str]:
 
     if re.search(r"VERSION_[A-Z_]+=.*latest", build):
         errors.append("build.sh contains a mutable latest fallback for a release dependency")
+    if 'echo "Downloading $asset_name"\n' in build:
+        errors.append("download progress is written to stdout and can corrupt command-substitution paths")
 
     if release_asset is not None:
         if not release_asset.is_file():
@@ -139,14 +137,12 @@ def main() -> int:
     parser.add_argument("--root", default=str(Path(__file__).resolve().parents[1]))
     parser.add_argument("--release-asset", type=Path)
     args = parser.parse_args()
-
     root = Path(args.root).resolve()
     try:
         errors = verify(root, args.release_asset)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
-
     if errors:
         for error in errors:
             print(f"ERROR: {error}", file=sys.stderr)
