@@ -3,7 +3,7 @@
 #
 # This script never flashes or restores a boot image. Before service.sh runs,
 # it narrows the live KPM directory to explicitly autoload-enabled `.kpm`
-# files and guarantees a valid signature-policy value.
+# files and guarantees one unambiguous signature-policy value.
 
 set -eu
 umask 077
@@ -37,15 +37,19 @@ admission_log() {
 
 normalize_signature_policy() {
   _policy=""
+  _policy_count=0
   if [ -f "$CONFIG_FILE" ]; then
-    _policy=$(sed -n 's/^KPM_SIGNATURE_POLICY=//p' "$CONFIG_FILE" 2>/dev/null | tail -n 1 | tr -d ' \t\r\n')
+    _policy_count=$(grep -c '^KPM_SIGNATURE_POLICY=' "$CONFIG_FILE" 2>/dev/null || true)
+    _policy=$(sed -n 's/^KPM_SIGNATURE_POLICY=//p' "$CONFIG_FILE" 2>/dev/null | head -n 1 | tr -d ' \t\r\n')
   fi
-  case "$_policy" in
-    off|warn|strict)
-      admission_log "signature policy preserved: $_policy"
-      return 0
-      ;;
-  esac
+  if [ "$_policy_count" = "1" ]; then
+    case "$_policy" in
+      off|warn|strict)
+        admission_log "signature policy preserved: $_policy"
+        return 0
+        ;;
+    esac
+  fi
 
   _config_tmp="${CONFIG_FILE}.tmp.$$"
   if [ -f "$CONFIG_FILE" ]; then
@@ -58,7 +62,7 @@ normalize_signature_policy() {
     || { rm -f "$_config_tmp"; return 1; }
   chmod 0600 "$_config_tmp" 2>/dev/null || true
   mv "$_config_tmp" "$CONFIG_FILE" || { rm -f "$_config_tmp"; return 1; }
-  admission_log "missing/invalid signature policy replaced with strict"
+  admission_log "missing, duplicate, or invalid signature policy replaced with strict"
   return 0
 }
 
