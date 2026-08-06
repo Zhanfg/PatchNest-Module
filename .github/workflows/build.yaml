@@ -21,15 +21,15 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34a6f41551a30e30af803 # v6
+        uses: actions/checkout@v6
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
         with:
           version: 10.28.2
 
       - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: pnpm
@@ -43,29 +43,29 @@ jobs:
       - name: Verify release metadata
         run: |
           set -euo pipefail
-          PROP_VER=$(sed -n 's/^version=//p' module/module.prop)
-          JSON_VER=$(jq -r '.version' update.json)
-          PROP_CODE=$(sed -n 's/^versionCode=//p' module/module.prop)
-          JSON_CODE=$(jq -r '.versionCode' update.json)
-          ZIP_URL=$(jq -r '.zipUrl' update.json)
-          ZIP_SHA=$(jq -r '.zipSha256' update.json)
+          prop_version=$(sed -n 's/^version=//p' module/module.prop)
+          json_version=$(jq -r '.version' update.json)
+          prop_code=$(sed -n 's/^versionCode=//p' module/module.prop)
+          json_code=$(jq -r '.versionCode' update.json)
+          zip_url=$(jq -r '.zipUrl' update.json)
+          zip_sha=$(jq -r '.zipSha256' update.json)
 
-          test "$PROP_VER" = "$JSON_VER" || {
-            echo "::error::Version mismatch: module.prop=$PROP_VER update.json=$JSON_VER"
+          test "$prop_version" = "$json_version" || {
+            echo "::error::Version mismatch: module.prop=$prop_version update.json=$json_version"
             exit 1
           }
-          test "$PROP_CODE" = "$JSON_CODE" || {
-            echo "::error::VersionCode mismatch: module.prop=$PROP_CODE update.json=$JSON_CODE"
+          test "$prop_code" = "$json_code" || {
+            echo "::error::VersionCode mismatch: module.prop=$prop_code update.json=$json_code"
             exit 1
           }
-          case "$JSON_VER" in
+          case "$json_version" in
             v*) echo "::error::Internal version must not include the Git tag v prefix"; exit 1 ;;
           esac
-          case "$ZIP_URL" in
-            */releases/download/v"$JSON_VER"/*) ;;
-            *) echo "::error::zipUrl must target tag v$JSON_VER"; exit 1 ;;
+          case "$zip_url" in
+            */releases/download/v"$json_version"/*) ;;
+            *) echo "::error::zipUrl must target tag v$json_version"; exit 1 ;;
           esac
-          printf '%s' "$ZIP_SHA" | grep -Eq '^[0-9a-f]{64}$' || {
+          printf '%s' "$zip_sha" | grep -Eq '^[0-9a-f]{64}$' || {
             echo "::error::zipSha256 must be 64 lowercase hexadecimal characters"
             exit 1
           }
@@ -76,6 +76,7 @@ jobs:
               exit 1
             }
           done
+
           for key in \
             kpimg_linux_0.13.3 \
             kptools_android_0.13.3 \
@@ -87,7 +88,6 @@ jobs:
               exit 1
             }
           done
-          echo "Metadata valid: $JSON_VER ($JSON_CODE), release tag v$JSON_VER"
 
       - name: Check shell syntax
         run: |
@@ -98,7 +98,7 @@ jobs:
 
       - name: ShellCheck
         run: |
-          shellcheck -s bash -S warning build.sh
+          shellcheck -s bash -S error build.sh
           shellcheck -s sh -S warning \
             --exclude=SC3043,SC2034,SC2115,SC2046,SC2319,SC2155 \
             module/service.sh module/customize.sh module/post-fs-data.sh \
@@ -117,11 +117,9 @@ jobs:
           for file in webui/public/locales/strings/*.xml; do
             [ "$(basename "$file")" = en.xml ] && continue
             extract_keys "$file" > /tmp/lang-keys
-            if ! diff=$(comm -23 /tmp/base-keys /tmp/lang-keys); then
-              true
-            fi
-            if [ -n "$diff" ]; then
-              echo "::error file=$file::Missing locale keys: $diff"
+            missing=$(comm -23 /tmp/base-keys /tmp/lang-keys)
+            if [ -n "$missing" ]; then
+              echo "::error file=$file::Missing locale keys: $missing"
               fail=1
             fi
           done
@@ -149,23 +147,23 @@ jobs:
       package_sha256: ${{ steps.package.outputs.sha256 }}
     steps:
       - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34a6f41551a30e30af803 # v6
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Setup Android NDK
-        uses: nttld/setup-ndk@ed92fe6cadad69be94a966a7ee3271275e62f779 # 1.6.0
+        uses: nttld/setup-ndk@ed92fe6cadad69be94a966a7ee3271275e62f779
         with:
           ndk-version: r26d
           log: error
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
         with:
           version: 10.28.2
 
       - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caa8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: pnpm
@@ -178,7 +176,9 @@ jobs:
 
       - name: Load dependency versions
         run: |
-          grep -v '^#' version.properties | sed -e '/^[[:space:]]*$/d' -e 's/ *= */=/' -e 's/"//g' >> "$GITHUB_ENV"
+          grep -v '^#' version.properties \
+            | sed -e '/^[[:space:]]*$/d' -e 's/ *= */=/' -e 's/"//g' \
+            >> "$GITHUB_ENV"
 
       - name: Download pinned binary dependencies
         env:
@@ -199,7 +199,9 @@ jobs:
       - name: Verify dependency SHA256
         run: |
           set -euo pipefail
-          get_prop() { sed -n "s/^$1=//p" version.properties | tr -d '"'; }
+          get_prop() {
+            grep -F "$1=" version.properties | head -n 1 | cut -d= -f2- | tr -d '"'
+          }
           verify() {
             expected=$(get_prop "$1")
             [ -n "$expected" ] || {
@@ -285,7 +287,7 @@ jobs:
           fi
 
       - name: Upload verified package
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@v6
         with:
           name: patchnest-module-${{ github.sha }}
           path: |
@@ -306,10 +308,10 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34a6f41551a30e30af803 # v6
+        uses: actions/checkout@v6
 
       - name: Download verified package
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        uses: actions/download-artifact@v7
         with:
           name: patchnest-module-${{ github.sha }}
           path: out
@@ -326,7 +328,7 @@ jobs:
           echo "$actual  out/PatchNest-Module.zip" | sha256sum -c -
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
           tag_name: ${{ needs.build.outputs.release_tag }}
           name: PatchNest ${{ needs.build.outputs.release_tag }}
