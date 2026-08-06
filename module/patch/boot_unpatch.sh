@@ -7,10 +7,8 @@
 MODPATH=${0%/*}
 PNDIR="/data/adb/patchnest"
 BACKUP_DIR="$PNDIR/backup"
-AUTORECOVERY_MARKER="$PNDIR/autorecovery_active"
 BOOTIMAGE=${1:-}
 
-# Load upstream helpers, then override direct flashing with the PatchNest guard.
 . "$MODPATH/util_functions.sh"
 . "$MODPATH/flash_guard.sh"
 
@@ -18,23 +16,23 @@ manifest_string() {
   _manifest=$1
   _key=$2
   grep -o "\"${_key}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$_manifest" 2>/dev/null \
-    | head -n 1 \
-    | sed -E 's/.*:[[:space:]]*"([^"]*)".*/\1/'
+    | head -n 1 | sed -E 's/.*:[[:space:]]*"([^"]*)".*/\1/'
 }
 
 manifest_bool() {
   _manifest=$1
   _key=$2
   grep -o "\"${_key}\"[[:space:]]*:[[:space:]]*[a-z]*" "$_manifest" 2>/dev/null \
-    | head -n 1 \
-    | sed -E 's/.*:[[:space:]]*([a-z]*).*/\1/'
+    | head -n 1 | sed -E 's/.*:[[:space:]]*([a-z]*).*/\1/'
 }
 
 validate_boot_image() {
   _image=$1
   [ -s "$_image" ] || return 1
+  _image_abs=$(readlink -f "$_image" 2>/dev/null || true)
+  [ -n "$_image_abs" ] && [ -s "$_image_abs" ] || return 1
   _validate_tmp=$(mktemp -d "${TMPDIR:-/data/local/tmp}/patchnest-unpack.XXXXXX") || return 1
-  if ! (cd "$_validate_tmp" && magiskboot unpack "$_image" >/dev/null 2>&1 && [ -s kernel ]); then
+  if ! (cd "$_validate_tmp" && magiskboot unpack "$_image_abs" >/dev/null 2>&1 && [ -s kernel ]); then
     rm -rf "$_validate_tmp"
     return 1
   fi
@@ -44,8 +42,7 @@ validate_boot_image() {
 
 select_verified_backup() {
   _target=$1
-  _target_real=$(readlink -f "$_target" 2>/dev/null || printf '%s' "$_target")
-  _target_name=$(basename "$_target_real")
+  _target_name=$(partition_name_for_target "$_target")
 
   [ -d "$BACKUP_DIR" ] || return 1
   for _candidate in $(ls -1t "$BACKUP_DIR"/boot_backup_*.img 2>/dev/null); do
@@ -71,8 +68,7 @@ select_verified_backup() {
   return 1
 }
 
-# Bootloop recovery entry point. This function remains callable by a future
-# early-boot recovery executor, but it never chooses a legacy, manifest-less,
+# Callable recovery primitive. It never selects a legacy, manifest-less,
 # target-mismatched, digest-mismatched, or unpack-invalid image.
 auto_unpatch() {
   [ -n "$BOOTIMAGE" ] && [ -e "$BOOTIMAGE" ] || {
@@ -87,8 +83,9 @@ auto_unpatch() {
   }
 
   echo "- auto_unpatch: verified backup: $_backup"
-  if ! flash_image "$_backup" "$BOOTIMAGE"; then
-    _rc=$?
+  flash_image "$_backup" "$BOOTIMAGE"
+  _rc=$?
+  if [ "$_rc" -ne 0 ]; then
     echo "! auto_unpatch: flash/readback verification failed ($_rc)" >&2
     return 4
   fi
@@ -104,16 +101,11 @@ auto_unpatch() {
 }
 assert_kernel_boot_target "$BOOTIMAGE" || exit 1
 
-command -v magiskboot >/dev/null 2>&1 || {
-  echo "! Command magiskboot not found" >&2
-  exit 1
-}
-command -v kptools >/dev/null 2>&1 || {
-  echo "! Command kptools not found" >&2
-  exit 1
-}
+command -v magiskboot >/dev/null 2>&1 || { echo "! Command magiskboot not found" >&2; exit 1; }
+command -v kptools >/dev/null 2>&1 || { echo "! Command kptools not found" >&2; exit 1; }
 
 # Never reuse artifacts left by an interrupted previous operation.
+magiskboot cleanup >/dev/null 2>&1 || true
 rm -f kernel kernel.ori new-boot.img
 
 echo "- Target image: $BOOTIMAGE"
@@ -122,10 +114,7 @@ if ! magiskboot unpack "$BOOTIMAGE" >/dev/null 2>&1; then
   echo "! Unpack error" >&2
   exit 1
 fi
-if [ ! -s kernel ]; then
-  echo "! Unpack produced no non-empty kernel payload" >&2
-  exit 1
-fi
+[ -s kernel ] || { echo "! Unpack produced no non-empty kernel payload" >&2; exit 1; }
 
 if ! kptools -i kernel -l 2>/dev/null | grep -q 'patched=true'; then
   echo "- Kernel is not PatchNest-patched; no unpatch required"
@@ -134,10 +123,7 @@ if ! kptools -i kernel -l 2>/dev/null | grep -q 'patched=true'; then
   exit 0
 fi
 
-mv kernel kernel.ori || {
-  echo "! Failed to preserve patched kernel" >&2
-  exit 1
-}
+mv kernel kernel.ori || { echo "! Failed to preserve patched kernel" >&2; exit 1; }
 echo "- Unpatching kernel"
 if ! kptools -u --image kernel.ori --out kernel; then
   echo "! Unpatch error" >&2
@@ -145,12 +131,8 @@ if ! kptools -u --image kernel.ori --out kernel; then
   mv kernel.ori kernel 2>/dev/null || true
   exit 1
 fi
-if [ ! -s kernel ]; then
-  echo "! Unpatch produced no non-empty kernel" >&2
-  exit 1
-fi
+[ -s kernel ] || { echo "! Unpatch produced no non-empty kernel" >&2; exit 1; }
 
-# Require kptools to report that the generated kernel is no longer patched.
 if kptools -i kernel -l 2>/dev/null | grep -q 'patched=true'; then
   echo "! Generated kernel still reports patched=true" >&2
   exit 1
@@ -161,13 +143,8 @@ if ! magiskboot repack "$BOOTIMAGE" >/dev/null 2>&1; then
   echo "! Repack error" >&2
   exit 1
 fi
-if [ ! -s new-boot.img ]; then
-  echo "! Repack produced no non-empty new-boot.img" >&2
-  exit 1
-fi
+[ -s new-boot.img ] || { echo "! Repack produced no non-empty new-boot.img" >&2; exit 1; }
 
-# Re-open the exact image that will be written. This catches malformed output,
-# missing kernel payloads, and stale/corrupt files before any block write.
 echo "- Validating unpatched boot image"
 if ! validate_boot_image new-boot.img; then
   echo "! Unpatched boot image validation failed" >&2
