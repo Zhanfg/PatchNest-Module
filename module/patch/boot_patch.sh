@@ -3,7 +3,8 @@
 # PatchNest Boot Image Patcher
 #
 # Usage: boot_patch.sh <bootimage> <flash_to_device:true|false> [kptools args]
-# Optional environment: KP_REBACKUP=1 forces a fresh verified backup.
+# Optional environment: KP_REBACKUP=1 requests a fresh verified backup, but a
+# currently PatchNest-patched image is never allowed to replace the recovery base.
 #######################################################################################
 
 MODPATH=${0%/*}
@@ -22,6 +23,21 @@ fail() {
   exit 1
 }
 
+resolve_kpimg() {
+  for _candidate in \
+    "${KPIMG_PATH:-}" \
+    "$MODPATH/../bin/kpimg" \
+    "$PWD/kpimg" \
+    "$MODPATH/kpimg"; do
+    [ -n "$_candidate" ] || continue
+    if [ -s "$_candidate" ]; then
+      readlink -f "$_candidate" 2>/dev/null || printf '%s' "$_candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
 json_escape() {
   printf '%s' "$1" | tr -d '\000-\037' | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
@@ -30,8 +46,10 @@ validate_boot_image() {
   _image=$1
   _expect_patched=$2
   [ -s "$_image" ] || return 1
+  _image_abs=$(readlink -f "$_image" 2>/dev/null || true)
+  [ -n "$_image_abs" ] && [ -s "$_image_abs" ] || return 1
   _tmp=$(mktemp -d "${TMPDIR:-/data/local/tmp}/patchnest-validate.XXXXXX") || return 1
-  if ! (cd "$_tmp" && magiskboot unpack "$_image" >/dev/null 2>&1 && [ -s kernel ]); then
+  if ! (cd "$_tmp" && magiskboot unpack "$_image_abs" >/dev/null 2>&1 && [ -s kernel ]); then
     rm -rf "$_tmp"
     return 1
   fi
@@ -47,6 +65,9 @@ validate_boot_image() {
 
 root_chain_state() {
   _state=stock
+  if [ -d /data/adb/ksu ] || [ -d /sys/module/ksu ]; then
+    _state=ksu
+  fi
   if [ -d /data/adb/magisk ]; then
     _state=magisk
   fi
@@ -61,14 +82,13 @@ write_backup_manifest() {
   _backup=$2
   _target=$3
   _backup_sha=$4
-  _target_real=$(readlink -f "$_target" 2>/dev/null || printf '%s' "$_target")
-  _target_name=$(basename "$_target_real")
+  _target_name=$(partition_name_for_target "$_target")
   _kp_state=$(root_chain_state)
   _magisk_version=$(magisk --version 2>/dev/null | head -n 1 | cut -d: -f1)
   [ -n "$_magisk_version" ] || _magisk_version=null
   _ksu_version=$(ksu --version 2>/dev/null | head -n 1 | tr -d '\r\n')
   [ -n "$_ksu_version" ] || _ksu_version=null
-  _kpimg_size=$(stat -c '%s' "$MODPATH/kpimg" 2>/dev/null)
+  _kpimg_size=$(stat -c '%s' "$KPIMG" 2>/dev/null)
   [ -n "$_kpimg_size" ] || _kpimg_size=0
   _verified_boot=$(getprop ro.boot.vbmeta.device_state 2>/dev/null)
   [ -n "$_verified_boot" ] || _verified_boot=unknown
@@ -154,7 +174,7 @@ case "$FLASH_TO_DEVICE" in
 esac
 command -v magiskboot >/dev/null 2>&1 || fail "Command magiskboot not found"
 command -v kptools >/dev/null 2>&1 || fail "Command kptools not found"
-[ -s "$MODPATH/kpimg" ] || fail "kpimg missing or empty"
+KPIMG=$(resolve_kpimg) || fail "kpimg missing or empty"
 
 if [ "$FLASH_TO_DEVICE" = "true" ]; then
   assert_kernel_boot_target "$BOOTIMAGE" || exit 1
@@ -182,8 +202,10 @@ if kptools -i kernel -l 2>/dev/null | grep -q 'patched=true'; then
   _currently_patched=true
 fi
 
-if [ "$_currently_patched" = "false" ] || [ "$KP_REBACKUP" = "1" ]; then
+if [ "$_currently_patched" = "false" ]; then
   backup_current_boot || fail "Could not create and verify boot backup"
+elif [ "$KP_REBACKUP" = "1" ]; then
+  fail "Refusing to replace recovery backup with an already patched boot image"
 else
   echo "- Existing PatchNest patch detected; preserving previous verified backup"
 fi
@@ -193,7 +215,7 @@ validate_embedded_kpms "$@" || exit 1
 mv kernel kernel.ori || fail "Could not preserve original kernel payload"
 echo "- Patching kernel"
 # Do not enable shell tracing here: kptools arguments may include a superkey.
-if ! kptools -p -i kernel.ori -k "$MODPATH/kpimg" -o kernel "$@"; then
+if ! kptools -p -i kernel.ori -k "$KPIMG" -o kernel "$@"; then
   rm -f kernel
   mv kernel.ori kernel 2>/dev/null || true
   fail "Kernel patch failed"
