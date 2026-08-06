@@ -20,8 +20,6 @@ fi
 ui_print "- Root manager: $ROOT_MGR"
 ui_print "- Architecture: $ARCH"
 
-# Validate the package before touching persistent state. Missing WebUI or boot
-# safety files must stop installation rather than produce a partial module.
 for _required_file in \
     module.prop \
     bin/kpatch \
@@ -39,7 +37,21 @@ for _required_file in \
     [ -s "$MODPATH/$_required_file" ] || abort "! Required package file missing or empty: $_required_file"
 done
 
-# Apply deterministic permissions to the framework-provided staging directory.
+grep -q '^id=PatchNest$' "$MODPATH/module.prop" \
+    || abort "! module.prop has an unexpected or missing id"
+grep -q '^version=' "$MODPATH/module.prop" \
+    || abort "! module.prop has no version"
+grep -q '^versionCode=[0-9][0-9]*$' "$MODPATH/module.prop" \
+    || abort "! module.prop has an invalid versionCode"
+
+# Preserve the validated original metadata before status.sh starts updating its
+# description field. The backup is inside the framework-owned module staging
+# path and is therefore removed with the module, not persistent user state.
+_prop_tmp="$MODPATH/module.prop.bak.tmp.$$"
+cp "$MODPATH/module.prop" "$_prop_tmp" || abort "! Cannot stage module.prop backup"
+[ -s "$_prop_tmp" ] || { rm -f "$_prop_tmp"; abort "! module.prop backup is empty"; }
+mv "$_prop_tmp" "$MODPATH/module.prop.bak" || abort "! Cannot finalize module.prop backup"
+
 set_perm_recursive "$MODPATH" 0 0 0755 0644
 set_perm_recursive "$MODPATH/bin" 0 2000 0755 0755
 set_perm_recursive "$MODPATH/patch" 0 0 0755 0755
@@ -47,20 +59,16 @@ for _script in \
     action.sh customize.sh detect_env.sh install_kpm.sh kpm_verify.sh \
     post-fs-data.sh service.sh status.sh uninstall.sh compile_kpm.sh; do
     [ -f "$MODPATH/$_script" ] && set_perm "$MODPATH/$_script" 0 0 0755
- done
+done
 
 mkdir -p "$STATE_DIR" || abort "! Cannot create $STATE_DIR"
 chmod 0700 "$STATE_DIR" 2>/dev/null || true
 
-# Persist root manager information atomically.
 _root_tmp="$STATE_DIR/root_manager.tmp.$$"
 printf '%s\n' "$ROOT_MGR" >"$_root_tmp" || abort "! Cannot write root manager state"
 mv "$_root_tmp" "$STATE_DIR/root_manager" || abort "! Cannot finalize root manager state"
 chmod 0600 "$STATE_DIR/root_manager" 2>/dev/null || true
 
-# Optional system-managed repository policy. Validate the top-level JSON type
-# when a parser is available, then install atomically. Existing user policy is
-# not overwritten when the package does not provide repos.json.
 if [ -f "$MODPATH/repos.json" ]; then
     if command -v jq >/dev/null 2>&1; then
         jq -e 'type == "array"' "$MODPATH/repos.json" >/dev/null 2>&1 \
@@ -73,8 +81,6 @@ if [ -f "$MODPATH/repos.json" ]; then
     ui_print "- Installed system repos.json"
 fi
 
-# Migrate APatch package policy only when PatchNest has no policy yet. Copy to
-# a temporary file first so interruption cannot leave a truncated policy.
 if [ -f /data/adb/ap/package_config ] && [ ! -f "$STATE_DIR/package_config" ]; then
     _policy_tmp="$STATE_DIR/package_config.tmp.$$"
     cp /data/adb/ap/package_config "$_policy_tmp" || abort "! Cannot migrate APatch package_config"
