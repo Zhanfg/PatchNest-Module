@@ -44,9 +44,6 @@ grep -q '^version=' "$MODPATH/module.prop" \
 grep -q '^versionCode=[0-9][0-9]*$' "$MODPATH/module.prop" \
     || abort "! module.prop has an invalid versionCode"
 
-# Preserve the validated original metadata before status.sh starts updating its
-# description field. The backup is inside the framework-owned module staging
-# path and is therefore removed with the module, not persistent user state.
 _prop_tmp="$MODPATH/module.prop.bak.tmp.$$"
 cp "$MODPATH/module.prop" "$_prop_tmp" || abort "! Cannot stage module.prop backup"
 [ -s "$_prop_tmp" ] || { rm -f "$_prop_tmp"; abort "! module.prop backup is empty"; }
@@ -68,6 +65,21 @@ _root_tmp="$STATE_DIR/root_manager.tmp.$$"
 printf '%s\n' "$ROOT_MGR" >"$_root_tmp" || abort "! Cannot write root manager state"
 mv "$_root_tmp" "$STATE_DIR/root_manager" || abort "! Cannot finalize root manager state"
 chmod 0600 "$STATE_DIR/root_manager" 2>/dev/null || true
+
+# New installations default to strict signature enforcement. Existing user
+# policy is never overwritten; users who intentionally selected off/warn keep
+# that choice across upgrades.
+if [ ! -e "$STATE_DIR/config" ]; then
+    _config_tmp="$STATE_DIR/config.tmp.$$"
+    printf '%s\n' 'KPM_SIGNATURE_POLICY=strict' >"$_config_tmp" \
+        || abort "! Cannot stage default KPM signature policy"
+    chmod 0600 "$_config_tmp" 2>/dev/null || true
+    mv "$_config_tmp" "$STATE_DIR/config" \
+        || abort "! Cannot install default KPM signature policy"
+    ui_print "- KPM signature policy: strict (new installation default)"
+else
+    ui_print "- Preserved existing KPM signature policy"
+fi
 
 if [ -f "$MODPATH/repos.json" ]; then
     if command -v jq >/dev/null 2>&1; then
