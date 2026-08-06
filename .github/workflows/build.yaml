@@ -1,579 +1,337 @@
 name: Build
 
-# Default: read-only token. The 'release' job overrides this with
-# `contents: write` (see below) so a compromised earlier step can't
-# publish a release.
 permissions:
   contents: read
 
 on:
+  pull_request:
+    branches: [main]
+    paths-ignore: ['**.md']
   push:
     branches: [main]
     paths-ignore: ['**.md']
   workflow_dispatch:
 
 env:
-  MODULE_NAME: 'PatchNest-Module'
+  MODULE_NAME: PatchNest-Module
 
 jobs:
-  # ═══ Pre-build tests (run on source code, no downloads needed) ═══
-  lint:
-    name: Lint & Source Checks
-    runs-on: ubuntu-latest
+  validate:
+    name: Source and WebUI validation
+    runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v6
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34a6f41551a30e30af803 # v6
 
-    # P0-4 fix: install Android NDK before any step that references
-    # $ANDROID_NDK_HOME. Without this, kp-safemode was never being built
-    # in CI despite the CHANGELOG claiming it was. The action's input
-    # is `ndk-version`, not `version`; `local` and `log` are not
-    # valid inputs (the runner's tool-cache is the default).
-    - name: Setup Android NDK
-      uses: nttld/setup-ndk@ed92fe6cadad69be94a966a7ee3271275e62f779 # 1.6.0
-      with:
-        ndk-version: r26d
-        log: error
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.28.2
 
-    - name: ShellCheck
-      run: |
-        sudo apt-get install -y shellcheck
-        shellcheck -s sh -S warning --exclude=SC3043,SC2034,SC2115,SC2046,SC2319,SC2155 \
-          module/service.sh module/customize.sh module/post-fs-data.sh \
-          module/action.sh module/status.sh module/uninstall.sh \
-          module/install_kpm.sh module/compile_kpm.sh
-        shellcheck -s sh -S warning --exclude=SC3043,SC2034,SC2115,SC2046,SC2319,SC2155 \
-          module/patch/boot_patch.sh module/patch/boot_extract.sh module/patch/boot_unpatch.sh
-        shellcheck -s sh -S error module/patch/util_functions.sh || true
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: webui/pnpm-lock.yaml
 
-    - name: Check shell script syntax
-      run: |
-        FAIL=0
-        for f in module/*.sh module/patch/*.sh; do
-          bash -n "$f" || FAIL=1
-        done
-        exit $FAIL
+      - name: Install validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck jq
 
-  config-check:
-    name: Config Consistency
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v6
+      - name: Verify release metadata
+        run: |
+          set -euo pipefail
+          PROP_VER=$(sed -n 's/^version=//p' module/module.prop)
+          JSON_VER=$(jq -r '.version' update.json)
+          PROP_CODE=$(sed -n 's/^versionCode=//p' module/module.prop)
+          JSON_CODE=$(jq -r '.versionCode' update.json)
+          ZIP_URL=$(jq -r '.zipUrl' update.json)
+          ZIP_SHA=$(jq -r '.zipSha256' update.json)
 
-    - name: module.prop vs update.json version match
-      run: |
-        PROP_VER=$(grep '^version=' module/module.prop | cut -d= -f2)
-        JSON_VER=$(jq -r .version update.json)
-        if [ "$PROP_VER" != "$JSON_VER" ]; then
-          echo "::error::Version mismatch: module.prop=$PROP_VER, update.json=$JSON_VER"
-          exit 1
-        fi
-        PROP_CODE=$(grep '^versionCode=' module/module.prop | cut -d= -f2)
-        JSON_CODE=$(jq -r .versionCode update.json)
-        if [ "$PROP_CODE" != "$JSON_CODE" ]; then
-          echo "::error::VersionCode mismatch: module.prop=$PROP_CODE, update.json=$JSON_CODE"
-          exit 1
-        fi
-        echo "✓ Versions consistent: $PROP_VER ($PROP_CODE)"
-
-    - name: version.properties has required keys
-      run: |
-        for key in patchnest kernelpatch magiskboot; do
-          if ! grep -q "^$key=" version.properties; then
-            echo "::error::Missing key '$key' in version.properties"
+          test "$PROP_VER" = "$JSON_VER" || {
+            echo "::error::Version mismatch: module.prop=$PROP_VER update.json=$JSON_VER"
             exit 1
-          fi
-        done
-        echo "✓ version.properties valid"
-
-    - name: All required scripts exist
-      run: |
-        FAIL=0
-        for f in module/customize.sh module/service.sh module/post-fs-data.sh \
-                 module/action.sh module/status.sh module/uninstall.sh \
-                 module/install_kpm.sh module/compile_kpm.sh \
-                 module/patch/boot_patch.sh module/patch/boot_extract.sh \
-                 module/patch/boot_unpatch.sh module/patch/util_functions.sh \
-                 module/module.prop; do
-          if [ ! -f "$f" ]; then
-            echo "::error::Missing required file: $f"
-            FAIL=1
-          fi
-        done
-        exit $FAIL
-
-  locale-check:
-    name: Locale Completeness
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v6
-
-    - name: Check all locales have keys from en.xml
-      run: |
-        extract_keys() { grep -oP 'name="\K[^"]+' "$1" | sort; }
-        BASE_KEYS=$(extract_keys webui/public/locales/strings/en.xml)
-        BASE_COUNT=$(echo "$BASE_KEYS" | wc -l)
-        echo "en.xml has $BASE_COUNT keys"
-        FAIL=0
-        for f in webui/public/locales/strings/*.xml; do
-          [ "$(basename "$f")" = "en.xml" ] && continue
-          LANG_COUNT=$(extract_keys "$f" | wc -l)
-          MISSING=$(comm -23 <(echo "$BASE_KEYS") <(extract_keys "$f") | wc -l)
-          if [ "$MISSING" -gt 0 ]; then
-            echo "::warning file=$f::$MISSING missing keys ($LANG_COUNT/$BASE_COUNT)"
-            FAIL=1
-          else
-            echo "✓ $(basename "$f"): complete ($LANG_COUNT keys)"
-          fi
-        done
-        exit $FAIL
-
-  kpm-validation:
-    name: KPM Test Files
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v6
-    - uses: actions/setup-node@v4
-      with: { node-version: 'lts/*' }
-    - name: Validate KPM test files
-      run: node tests/validate_kpm.js
-
-  arm64-test:
-    name: ARM64 Binary Test
-    runs-on: ubuntu-latest
-    needs: [lint, config-check]
-    steps:
-    - uses: actions/checkout@v6
-      with: { fetch-depth: 1 }
-
-    - name: Install QEMU user-mode
-      run: sudo apt-get update && sudo apt-get install -y qemu-user-static binfmt-support
-
-    # P0-4 fix: install Android NDK for kp-safemode cross-compilation.
-    # Previously $ANDROID_NDK_HOME was never provisioned, so the build
-    # step silently skipped and kp-safemode was never shipped.
-    - name: Setup Android NDK
-      uses: nttld/setup-ndk@ed92fe6cadad69be94a966a7ee3271275e62f779 # 1.6.0
-      with:
-        ndk-version: r26d
-        log: error
-
-    - name: Load versions
-      run: grep -v '^#' version.properties | sed -e 's/ *= */=/g' -e 's/"//g' >> $GITHUB_ENV
-
-    - name: Download KernelPatch binaries
-      env:
-        # GitHub CLI requires a token to download release artifacts
-        # from another repo. The standard GITHUB_TOKEN works for
-        # cross-repo public releases. Scoped to this step (not the
-        # whole job) to limit blast radius.
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        mkdir -p module/bin
-        TAG="${{ env['kernelpatch'] }}"
-        ARGS=("-R" "Zhanfg/KernelPatch-Public" "-p" "kpimg-linux" "-p" "kptools-android" "-D" "module/bin")
-        if [ "$TAG" != "latest" ]; then gh release download "$TAG" "${ARGS[@]}"; else gh release download "${ARGS[@]}"; fi
-        mv module/bin/kpimg-linux module/bin/kpimg
-        mv module/bin/kptools-android module/bin/kptools
-
-    - name: Download kpatch tool
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        TAG="${{ env['patchnest'] }}"
-        ARGS=("-R" "Zhanfg/PatchNest" "-p" "kpatch-android" "-D" "module/bin")
-        if [ "$TAG" != "latest" ]; then gh release download "$TAG" "${ARGS[@]}"; else gh release download "${ARGS[@]}"; fi
-        mv module/bin/kpatch-android module/bin/kpatch
-
-    # P1-fix (ultracode-audit-2026-06-06): verify SHA256 of every
-    # downloaded root-level binary against the value pinned in
-    # version.properties. Previously the CI arm64-test job skipped
-    # this check, so a MITM or compromised upstream could substitute
-    # a malicious kpatch/kptools/kpimg into a release. We source
-    # version.properties directly (instead of via $GITHUB_ENV) so
-    # the comparison picks up the same keys the local build.sh uses.
-    # NOTE: continue-on-error here is intentional for the test job.
-    # The arm64-test step is a smoke test of the download+verify
-    # pipeline; the matching check in the release job below is a
-    # hard failure and remains the source of truth for production
-    # SHA pinning. The test path is allowed to pass with a stale
-    # pin so maintainers can iterate on download wiring without
-    # blocking the build on a maintainer-side hash refresh.
-    - name: Verify SHA256 of downloaded binaries
-      continue-on-error: true
-      run: |
-        #!/bin/bash
-        set -euo pipefail
-        get_ver() { grep "^$1[[:space:]]*=" version.properties | cut -d'=' -f2 | xargs; }
-        check() {
-          local name="$1" tag="$2" file="$3"
-          local key="${name//[-.]/_}_${tag}"
-          local expected
-          expected=$(get_ver "$key" || true)
-          if [[ -z "$expected" ]]; then
-            echo "::error::No SHA256 pinned in version.properties for $key — refusing to run unverified binary $file"
+          }
+          test "$PROP_CODE" = "$JSON_CODE" || {
+            echo "::error::VersionCode mismatch: module.prop=$PROP_CODE update.json=$JSON_CODE"
             exit 1
-          fi
-          echo "$expected  $file" | sha256sum -c -
-        }
-        check "kpimg-linux"   "${{ env['kernelpatch'] }}" module/bin/kpimg
-        check "kptools-android" "${{ env['kernelpatch'] }}" module/bin/kptools
-        check "kpatch-android"  "${{ env['patchnest'] }}" module/bin/kpatch
-
-    - name: Verify binary format (ELF64 aarch64)
-      run: |
-        echo "=== Binary Format Check ==="
-        for bin in module/bin/kpatch module/bin/kptools; do
-          echo -n "$bin: "
-          TYPE=$(file "$bin")
-          echo "$TYPE"
-          if ! echo "$TYPE" | grep -q "ELF 64-bit.*ARM aarch64"; then
-            echo "::error::$bin is not a valid aarch64 ELF binary"
+          }
+          case "$JSON_VER" in
+            v*) echo "::error::Internal version must not include the Git tag v prefix"; exit 1 ;;
+          esac
+          case "$ZIP_URL" in
+            */releases/download/v"$JSON_VER"/*) ;;
+            *) echo "::error::zipUrl must target tag v$JSON_VER"; exit 1 ;;
+          esac
+          printf '%s' "$ZIP_SHA" | grep -Eq '^[0-9a-f]{64}$' || {
+            echo "::error::zipSha256 must be 64 lowercase hexadecimal characters"
             exit 1
-          fi
-        done
-        echo -n "module/bin/kpimg: "
-        file module/bin/kpimg
-        echo "✓ All binaries are valid aarch64 ELF or raw image"
+          }
 
-    - name: Build kp-safemode helper
-      run: |
-        NDK_CLANG="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
-        if [ ! -x "$NDK_CLANG" ]; then
-          NDK_CLANG="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
-        fi
-        "$NDK_CLANG" --target=aarch64-linux-android24 -static -O2 -Wall -Wextra \
-          -o module/bin/kp-safemode module/tools/kp-safemode.c
-        chmod +x module/bin/kp-safemode
+          for key in patchnest kernelpatch magiskboot; do
+            grep -q "^${key}=" version.properties || {
+              echo "::error::Missing version key: $key"
+              exit 1
+            }
+          done
+          for key in \
+            kpimg_linux_0.13.3 \
+            kptools_android_0.13.3 \
+            kpatch_android_0.13.5-2 \
+            magisk_apk_v30.7; do
+            value=$(sed -n "s/^${key}=//p" version.properties)
+            printf '%s' "$value" | grep -Eq '^[0-9a-f]{64}$' || {
+              echo "::error::Missing or invalid SHA256 pin: $key"
+              exit 1
+            }
+          done
+          echo "Metadata valid: $JSON_VER ($JSON_CODE), release tag v$JSON_VER"
 
-    - name: Test kpatch binary under QEMU
-      run: |
-        echo "=== QEMU ARM64 Emulation Test ==="
-        chmod +x module/bin/kpatch module/bin/kptools
+      - name: Check shell syntax
+        run: |
+          set -euo pipefail
+          for file in build.sh module/*.sh module/patch/*.sh; do
+            bash -n "$file"
+          done
 
-        # kpatch is dynamically linked against Android's linker64.
-        # Set up sysroot from Android NDK for arm64.
-        ANDROID_SYSROOT="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+      - name: ShellCheck
+        run: |
+          shellcheck -s bash -S warning build.sh
+          shellcheck -s sh -S warning \
+            --exclude=SC3043,SC2034,SC2115,SC2046,SC2319,SC2155 \
+            module/service.sh module/customize.sh module/post-fs-data.sh \
+            module/action.sh module/status.sh module/uninstall.sh \
+            module/install_kpm.sh module/compile_kpm.sh \
+            module/patch/boot_patch.sh module/patch/boot_extract.sh \
+            module/patch/boot_unpatch.sh
+          shellcheck -s sh -S error module/patch/util_functions.sh || true
 
-        if [ -d "$ANDROID_SYSROOT" ]; then
-          export QEMU_LD_PREFIX="$ANDROID_SYSROOT"
-          echo "Using NDK sysroot: $ANDROID_SYSROOT"
-        else
-          echo "NDK sysroot not found, testing without linker (expected to fail)"
-        fi
+      - name: Verify locale completeness
+        run: |
+          set -euo pipefail
+          extract_keys() { grep -oP 'name="\K[^"]+' "$1" | sort; }
+          extract_keys webui/public/locales/strings/en.xml > /tmp/base-keys
+          fail=0
+          for file in webui/public/locales/strings/*.xml; do
+            [ "$(basename "$file")" = en.xml ] && continue
+            extract_keys "$file" > /tmp/lang-keys
+            if ! diff=$(comm -23 /tmp/base-keys /tmp/lang-keys); then
+              true
+            fi
+            if [ -n "$diff" ]; then
+              echo "::error file=$file::Missing locale keys: $diff"
+              fail=1
+            fi
+          done
+          exit "$fail"
 
-        # Test: kpatch should run without segfault (hello will fail since no patched kernel)
-        echo "--- kpatch hello ---"
-        timeout 5 qemu-aarch64-static module/bin/kpatch hello 2>&1 || true
-        echo "(expected to fail — no patched kernel or linker)"
+      - name: Install WebUI dependencies
+        run: pnpm --dir webui install --frozen-lockfile
 
-        # Test: kpatch should handle version query
-        echo "--- kpatch version check ---"
-        timeout 5 qemu-aarch64-static module/bin/kpatch kpver 2>&1 || true
-        echo "(expected to fail — no patched kernel)"
+      - name: Test WebUI
+        run: pnpm --dir webui test
 
-        # Test: kpatch binary is responsive (doesn't hang/crash)
-        echo "--- kpatch crash test ---"
-        timeout 5 qemu-aarch64-static module/bin/kpatch 2>&1 || true
-        echo "✓ kpatch binary executed without segfault"
+      - name: Build WebUI
+        run: pnpm --dir webui build
 
-    - name: Test kptools binary under QEMU
-      run: |
-        echo "=== kptools QEMU Test ==="
-        chmod +x module/bin/kptools
-        ANDROID_SYSROOT="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
-        [ -d "$ANDROID_SYSROOT" ] && export QEMU_LD_PREFIX="$ANDROID_SYSROOT"
+      - name: Validate checked-in KPM fixtures
+        run: node tests/validate_kpm.js
 
-        echo "--- kptools help ---"
-        timeout 5 qemu-aarch64-static module/bin/kptools --help 2>&1 || true
-        echo "✓ kptools binary executed without segfault"
-
-    - name: Test kpatch event supercall
-      run: |
-        echo "=== KPM Event Test ==="
-        # This will fail (no kernel) but validates the binary handles the command
-        timeout 5 qemu-aarch64-static module/bin/kpatch event POST_FS_DATA "" "" 2>&1 || true
-        echo "✓ kpatch event command executed"
-
-    - name: Test KPM load command
-      run: |
-        echo "=== KPM Load Test ==="
-        # Create a dummy .kpm file to test load path
-        echo "dummy" > /tmp/test.kpm
-        timeout 5 qemu-aarch64-static module/bin/kpatch kpm load /tmp/test.kpm 2>&1 || true
-        echo "✓ kpatch kpm load command executed"
-
-    - name: Test kp-safemode helper
-      run: |
-        echo "=== kp-safemode Test ==="
-        # kp-safemode is statically linked; no NDK sysroot needed.
-        # It will fail under QEMU (no patched kernel), but should at least
-        # execute without segfault and exit non-zero with a clear error.
-        timeout 5 qemu-aarch64-static module/bin/kp-safemode 2>&1 || true
-        echo "✓ kp-safemode binary executed without segfault"
-
-  # ═══ Full build + release ═══
   build:
-    name: Build & Release
-    runs-on: ubuntu-latest
-    needs: [lint, config-check, locale-check, kpm-validation, arm64-test]
+    name: Verified ARM64 package
+    runs-on: ubuntu-24.04
+    needs: validate
     outputs:
-      version: ${{ steps.check_tag.outputs.version }}
-      check_tag: ${{ steps.check_tag.outputs.need_release }}
+      release_tag: ${{ steps.release_meta.outputs.tag }}
+      should_release: ${{ steps.release_meta.outputs.should_release }}
+      package_sha256: ${{ steps.package.outputs.sha256 }}
     steps:
-    - uses: actions/checkout@v6
-      with: { fetch-depth: 1 }
-    # P0-4 fix: build job also needs NDK for kp-safemode cross-compile
-    # AND for the anti-detect KPM suite (module/kpms/*.c -> *.kpm).
-    - name: Setup Android NDK
-      uses: nttld/setup-ndk@ed92fe6cadad69be94a966a7ee3271275e62f779 # 1.6.0
-      with:
-        ndk-version: r26d
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34a6f41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
 
-    - name: Load versions
-      run: grep -v '^#' version.properties | sed -e 's/ *= */=/g' -e 's/"//g' >> $GITHUB_ENV
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@ed92fe6cadad69be94a966a7ee3271275e62f779 # 1.6.0
+        with:
+          ndk-version: r26d
+          log: error
 
-    # === KernelPatch binaries (kpimg, kptools) ===
-    - name: Download KernelPatch binaries
-      env:
-        # GitHub CLI requires a token to download release artifacts
-        # from another repo. The standard GITHUB_TOKEN works for
-        # cross-repo public releases. Scoped to this step (not the
-        # whole job) to limit blast radius.
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        mkdir -p module/bin
-        TAG="${{ env['kernelpatch'] }}"
-        ARGS=("-R" "Zhanfg/KernelPatch-Public" "-p" "kpimg-linux" "-p" "kptools-android" "-D" "module/bin")
-        if [ "$TAG" != "latest" ]; then gh release download "$TAG" "${ARGS[@]}"; else gh release download "${ARGS[@]}"; fi
-        mv module/bin/kpimg-linux module/bin/kpimg
-        mv module/bin/kptools-android module/bin/kptools
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.28.2
 
-    # === kpatch user-space tool (only from PatchNest) ===
-    - name: Download kpatch tool
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        TAG="${{ env['patchnest'] }}"
-        ARGS=("-R" "Zhanfg/PatchNest" "-p" "kpatch-android" "-D" "module/bin")
-        if [ "$TAG" != "latest" ]; then gh release download "$TAG" "${ARGS[@]}"; else gh release download "${ARGS[@]}"; fi
-        mv module/bin/kpatch-android module/bin/kpatch
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caa8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: webui/pnpm-lock.yaml
 
-    # P1-fix (ultracode-audit-2026-06-06): verify SHA256 of every
-    # root-level binary before they get packaged into the release
-    # zip. Without this, a compromised release artifact (or a
-    # simple tag-mismatch in version.properties) would silently
-    # ship a malicious binary to every user. We use the same
-    # version.properties keys the local build.sh uses, so the CI
-    # check is consistent with what a maintainer running build.sh
-    # locally would see.
-    # NOTE: continue-on-error is intentional here. The pinned SHA256s
-    # in version.properties are stale (the upstream release artifacts
-    # have been re-uploaded and the hashes no longer match). A
-    # maintainer-side hash refresh is required before the production
-    # release can be published. The release job is gated on a
-    # separate 'if: github.event_name != pull_request' check (see
-    # check_tag below), so this CI run — which is on a push to main
-    # — would not actually publish a release even if the SHA check
-    # passed. Marking the SHA check as soft here lets us iterate
-    # on download-wiring and locale-completeness without being
-    # blocked on an out-of-band hash refresh.
-    - name: Verify SHA256 of downloaded binaries
-      continue-on-error: true
-      run: |
-        #!/bin/bash
-        set -euo pipefail
-        get_ver() { grep "^$1[[:space:]]*=" version.properties | cut -d'=' -f2 | xargs; }
-        check() {
-          local name="$1" tag="$2" file="$3"
-          local key="${name//[-.]/_}_${tag}"
-          local expected
-          expected=$(get_ver "$key" || true)
-          if [[ -z "$expected" ]]; then
-            echo "::error::No SHA256 pinned in version.properties for $key — refusing to package unverified binary $file"
-            exit 1
-          fi
-          echo "$expected  $file" | sha256sum -c -
-        }
-        check "kpimg-linux"   "${{ env['kernelpatch'] }}" module/bin/kpimg
-        check "kptools-android" "${{ env['kernelpatch'] }}" module/bin/kptools
-        check "kpatch-android"  "${{ env['patchnest'] }}" module/bin/kpatch
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq zip unzip file
 
-    # === Magiskboot ===
-    - name: Download magiskboot
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      continue-on-error: true
-      run: |
-        set -euo pipefail
-        TAG="${{ env.magiskboot }}"
-        ARGS=("-R" "topjohnwu/Magisk" "-p" "Magisk*.apk" "-O" "magisk.apk")
-        if [ "$TAG" != "latest" ]; then gh release download "$TAG" "${ARGS[@]}"; else gh release download "${ARGS[@]}"; fi
-        # Verify Magisk APK integrity before extracting magiskboot.
-        # MEDIUM (security review): previously this was a fail-open
-        # `::warning` if no SHA was pinned. Match the hard-fail
-        # behavior of the other binary-verification steps so a
-        # missing pin (a release-engineer mistake) cannot ship an
-        # unverified magiskboot to end users.
-        get_ver() { grep "^$1[[:space:]]*=" version.properties | cut -d'=' -f2 | xargs; }
-        APK_SHA=$(get_ver "Magisk_apk_${{ env.magiskboot }}" || true)
-        if [ -z "$APK_SHA" ]; then
-          echo "::error::No SHA256 pinned for Magisk APK in version.properties — refusing to extract unverified binary"
-          exit 1
-        fi
-        echo "$APK_SHA  magisk.apk" | sha256sum -c -
-        unzip -p magisk.apk 'lib/arm64-v8a/libmagiskboot.so' > module/bin/magiskboot
-        rm magisk.apk
+      - name: Load dependency versions
+        run: |
+          grep -v '^#' version.properties | sed -e '/^[[:space:]]*$/d' -e 's/ *= */=/' -e 's/"//g' >> "$GITHUB_ENV"
 
-    # === Build kp-safemode helper (queries SUPERCALL_SU_GET_SAFEMODE) ===
-    - name: Build kp-safemode with NDK clang
-      run: |
-        NDK_CLANG="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
-        if [ ! -x "$NDK_CLANG" ]; then
-          NDK_CLANG="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
-        fi
-        "$NDK_CLANG" --target=aarch64-linux-android24 -static -O2 -Wall -Wextra \
-          -o module/bin/kp-safemode module/tools/kp-safemode.c
-        chmod +x module/bin/kp-safemode
-        file module/bin/kp-safemode
+      - name: Download pinned binary dependencies
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p module/bin
+          gh release download "$kernelpatch" \
+            -R Zhanfg/KernelPatch-Public \
+            -p kpimg-linux -p kptools-android -D module/bin
+          gh release download "$patchnest" \
+            -R Zhanfg/PatchNest \
+            -p kpatch-android -D module/bin
+          gh release download "$magiskboot" \
+            -R topjohnwu/Magisk \
+            -p 'Magisk*.apk' -O magisk.apk
 
-    # === Build anti-detect KPM suite (module/kpms/*.c -> *.kpm) ===
-    # NOTE: continue-on-error is intentional. The KPM sources were
-    # moved to a standalone Kpm-Repo project (commit 12b2210); the
-    # build.yaml recipe in this repo still references
-    # 'module/kpms/*.c' which no longer exists on main. Once the
-    # Kpm-Repo integration script (kpm_repo_sync.sh or similar)
-    # lands, this step can be replaced with a clone-and-build of
-    # the Kpm-Repo at a pinned SHA. Until then, the failure here is
-    # expected and the rest of the build (the actual module.zip
-    # artifact) proceeds.
-    - name: Build anti-detect KPM suite
-      continue-on-error: true
-      run: |
-        NDK_CLANG="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
-        if [ ! -x "$NDK_CLANG" ]; then
-          NDK_CLANG="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
-        fi
-        mkdir -p module/kpms/built
-        BUILD_ID="${{ github.sha }}"
-        BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        for src in module/kpms/*.c; do
-          [ -f "$src" ] || continue
-          base=$(basename "$src" .c)
-          out="module/kpms/built/${base}.kpm"
-          "$NDK_CLANG" --target=aarch64-linux-android24 -static -O2 -Wall -Wextra \
-            -fPIC -shared -nostdlib -fno-builtin -Wl,--build-id=sha1 \
-            -DKPM_BUILD_ID="\"$BUILD_ID\"" \
-            -DKPM_BUILD_TIME="\"$BUILD_TIME\"" \
-            -o "$out" "$src"
-          chmod 0644 "$out"
-          # Append the WebUI manifest tail (8-byte magic + base + json).
-          manifest=$(printf '{"id":"%s","build":"%s","time":"%s","size":%d}' \
-            "$base" "${BUILD_ID:0:7}" "$BUILD_TIME" \
-            "$(stat -c %s "$out")")
-          ( printf 'KPMM\x01\x00\x00\x00'; \
-            printf '%-5s' "$base"; \
-            printf '%s' "$manifest" ) > /tmp/manifest
-          cat "$out" /tmp/manifest > "${out}.tmp"
-          mv "${out}.tmp" "$out"
-          rm /tmp/manifest
-          echo "  ✓ ${base}.kpm ($(stat -c %s "$out") bytes)"
-        done
-        # Verify the suite — make sure all 6 KPMs built and look like
-        # valid aarch64 ELF files.
-        file module/kpms/built/*.kpm | grep -q "ARM aarch64" \
-          || { echo "::error::anti-detect KPM suite failed ELF check"; exit 1; }
-        ls -la module/kpms/built/
+      - name: Verify dependency SHA256
+        run: |
+          set -euo pipefail
+          get_prop() { sed -n "s/^$1=//p" version.properties | tr -d '"'; }
+          verify() {
+            expected=$(get_prop "$1")
+            [ -n "$expected" ] || {
+              echo "::error::No SHA256 pin for $1"
+              exit 1
+            }
+            echo "$expected  $2" | sha256sum -c -
+          }
+          verify "kpimg_linux_${kernelpatch}" module/bin/kpimg-linux
+          verify "kptools_android_${kernelpatch}" module/bin/kptools-android
+          verify "kpatch_android_${patchnest}" module/bin/kpatch-android
+          verify "magisk_apk_${magiskboot}" magisk.apk
 
-    # === WebUI ===
-    - uses: pnpm/action-setup@v4
-      with: { version: 'latest' }
-    - uses: actions/setup-node@v4
-      with: { node-version: 'latest', cache: pnpm, cache-dependency-path: webui/pnpm-lock.yaml }
-    - name: Build WebUI
-      run: cd webui && pnpm install --frozen-lockfile && pnpm build
+      - name: Prepare module binaries
+        run: |
+          set -euo pipefail
+          mv module/bin/kpimg-linux module/bin/kpimg
+          mv module/bin/kptools-android module/bin/kptools
+          mv module/bin/kpatch-android module/bin/kpatch
+          unzip -p magisk.apk 'lib/arm64-v8a/libmagiskboot.so' > module/bin/magiskboot
+          test -s module/bin/magiskboot
+          rm magisk.apk
+          chmod 0755 module/bin/kpatch module/bin/kptools module/bin/magiskboot
 
-    # === Comprehensive module validation ===
-    - name: Validate module package (comprehensive)
-      run: node tests/validate_module.js
+      - name: Build kp-safemode
+        run: |
+          set -euo pipefail
+          clang="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
+          test -x "$clang"
+          "$clang" -static -O2 -Wall -Wextra \
+            -o module/bin/kp-safemode module/tools/kp-safemode.c
+          chmod 0755 module/bin/kp-safemode
 
-    - uses: actions/upload-artifact@v6
-      with:
-        name: ${{ env.MODULE_NAME }}-${{ github.run_number }}
-        path: module
+      - name: Verify ARM64 binaries
+        run: |
+          set -euo pipefail
+          for binary in module/bin/kpatch module/bin/kptools module/bin/kp-safemode; do
+            description=$(file "$binary")
+            echo "$description"
+            printf '%s' "$description" | grep -q 'ELF 64-bit.*ARM aarch64' || {
+              echo "::error::$binary is not an ARM64 ELF"
+              exit 1
+            }
+          done
+          test -s module/bin/kpimg
+          test -s module/bin/magiskboot
 
-    # P1 (security review): guard against pull_request triggers that
-    # would otherwise mutate the published version catalog. The release
-    # job below depends on this job, so a PR can't directly publish
-    # a release — but the `check_tag` step would still set need_release
-    # based on PR-supplied update.json, and any error in that path
-    # could leak into the artifact upload. Reject early.
-    - name: Check if valid to release
-      id: check_tag
-      if: github.event_name != 'pull_request'
-      run: |
-          git fetch --tags
-          VERSION="$(jq -r .version update.json)"
-          if [ -z "$VERSION" ]; then
-            echo "need_release=false" >> $GITHUB_OUTPUT
-          elif git tag -l "$VERSION" | grep -q .; then
-            echo "need_release=false" >> $GITHUB_OUTPUT
+      - name: Build WebUI
+        run: |
+          pnpm --dir webui install --frozen-lockfile
+          pnpm --dir webui build
+
+      - name: Validate complete module
+        run: node tests/validate_module.js
+
+      - name: Package module
+        id: package
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          (cd module && zip -qr ../out/PatchNest-Module.zip .)
+          test -s out/PatchNest-Module.zip
+          sha=$(sha256sum out/PatchNest-Module.zip | awk '{print $1}')
+          echo "$sha  out/PatchNest-Module.zip" > out/PatchNest-Module.zip.sha256
+          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
+          unzip -l out/PatchNest-Module.zip | grep -q 'module.prop'
+          unzip -l out/PatchNest-Module.zip | grep -q 'webroot/index.html'
+
+      - name: Determine release tag
+        id: release_meta
+        run: |
+          set -euo pipefail
+          version=$(jq -r '.version' update.json)
+          tag="v$version"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          git fetch --tags --force
+          if [ "${{ github.event_name }}" = push ] \
+             && [ "${{ github.ref }}" = refs/heads/main ] \
+             && ! git rev-parse "$tag" >/dev/null 2>&1; then
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
           else
-            echo "version=$VERSION" >> $GITHUB_OUTPUT
-            echo "need_release=true" >> $GITHUB_OUTPUT
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
           fi
-    - name: Suppress release on PRs
-      id: check_tag_pr
-      if: github.event_name == 'pull_request'
-      run: |
-          echo "need_release=false" >> $GITHUB_OUTPUT
+
+      - name: Upload verified package
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: patchnest-module-${{ github.sha }}
+          path: |
+            out/PatchNest-Module.zip
+            out/PatchNest-Module.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
 
   release:
-    # P1 (security review): restore 'contents: write' here. The
-    # workflow-level default is read-only; only the release job
-    # needs to push tags + create the GitHub release. The
-    # 'softprops/action-gh-release' step below will fail closed
-    # if this permission isn't granted.
+    name: Publish release
+    runs-on: ubuntu-24.04
+    needs: build
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      needs.build.outputs.should_release == 'true'
     permissions:
       contents: write
-    runs-on: ubuntu-latest
-    needs: build
-    if: needs.build.outputs.check_tag == 'true'
     steps:
-    - uses: actions/checkout@v6
-      with: { fetch-depth: 2 }
-    - uses: actions/download-artifact@v7
-      with:
-        name: ${{ env.MODULE_NAME }}-${{ github.run_number }}
-        path: ${{ env.MODULE_NAME }}
-    - name: Package release artifact
-      run: |
-        set -euo pipefail
-        # The downloaded artifact is a flat directory of module files
-        # (service.sh, module.prop, bin/, webroot/, patch/, ...). The
-        # root manager unzips the release into a directory of its
-        # choosing and renames it to `module/`. So the zip's
-        # internal layout should be the module root contents
-        # directly — i.e. module.prop, bin/, webroot/, etc. sit at
-        # the zip root.
-        #
-        # The 'find -maxdepth 1' approach is the original build.sh's
-        # contract (cd module && zip -r ... .). We do it with a
-        # one-liner here.
-        cd "$MODULE_NAME"
-        test -f module.prop || { echo "::error::module.prop missing"; exit 1; }
-        # zip everything under the current dir, but EXCLUDE the
-        # MODULE_NAME dir itself (which would otherwise be a
-        # self-referential zip). We use zip's built-in -x flag.
-        zip -r "../${MODULE_NAME}.zip" . -x "${MODULE_NAME}/*"
-    - name: Generate changelog
-      run: |
-        CHANGELOG_RAW=$(git diff HEAD~1 HEAD -- "CHANGELOG.md" 2>/dev/null | grep '^+[^+]' | sed 's/^+//' || echo 'No changelog')
-        { echo "CHANGELOG<<_CL_EOF_"; echo -e "${CHANGELOG_RAW}"; echo "_CL_EOF_"; } >> $GITHUB_ENV
-    - uses: softprops/action-gh-release@v2
-      with:
-        tag_name: ${{ needs.build.outputs.version }}
-        name: ${{ needs.build.outputs.version }}
-        body: ${{ env.CHANGELOG }}
-        files: ${{ env.MODULE_NAME }}.zip
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34a6f41551a30e30af803 # v6
+
+      - name: Download verified package
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: patchnest-module-${{ github.sha }}
+          path: out
+
+      - name: Verify release manifest
+        run: |
+          set -euo pipefail
+          actual=$(sha256sum out/PatchNest-Module.zip | awk '{print $1}')
+          expected=$(jq -r '.zipSha256' update.json)
+          test "$actual" = "$expected" || {
+            echo "::error::Package SHA256 $actual does not match update.json $expected"
+            exit 1
+          }
+          echo "$actual  out/PatchNest-Module.zip" | sha256sum -c -
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: ${{ needs.build.outputs.release_tag }}
+          name: PatchNest ${{ needs.build.outputs.release_tag }}
+          prerelease: ${{ contains(needs.build.outputs.release_tag, '-') }}
+          generate_release_notes: true
+          files: |
+            out/PatchNest-Module.zip
+            out/PatchNest-Module.zip.sha256
