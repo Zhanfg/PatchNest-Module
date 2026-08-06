@@ -1,13 +1,17 @@
 #!/system/bin/sh
 #######################################################################################
 # PatchNest Boot Image Unpatcher
-# Based on APatch boot_unpatch.sh, with PatchNest fail-closed recovery checks.
+#
+# Usage: boot_unpatch.sh <bootimage> [flash_to_device:true|false]
+# The default remains `true` for existing WebUI callers. `false` generates and
+# verifies an unpatched image without writing a block device.
 #######################################################################################
 
 MODPATH=${0%/*}
 PNDIR="/data/adb/patchnest"
 BACKUP_DIR="$PNDIR/backup"
 BOOTIMAGE=${1:-}
+FLASH_TO_DEVICE=${2:-true}
 
 . "$MODPATH/util_functions.sh"
 . "$MODPATH/flash_guard.sh"
@@ -99,7 +103,13 @@ auto_unpatch() {
   echo "! Target image does not exist: $BOOTIMAGE" >&2
   exit 1
 }
-assert_kernel_boot_target "$BOOTIMAGE" || exit 1
+case "$FLASH_TO_DEVICE" in
+  true|false) ;;
+  *) echo "! flash_to_device must be true or false" >&2; exit 2 ;;
+esac
+if [ "$FLASH_TO_DEVICE" = "true" ]; then
+  assert_kernel_boot_target "$BOOTIMAGE" || exit 1
+fi
 
 command -v magiskboot >/dev/null 2>&1 || { echo "! Command magiskboot not found" >&2; exit 1; }
 command -v kptools >/dev/null 2>&1 || { echo "! Command kptools not found" >&2; exit 1; }
@@ -152,16 +162,24 @@ if ! validate_boot_image new-boot.img; then
   exit 1
 fi
 
-echo "- Flashing boot image"
-flash_image new-boot.img "$BOOTIMAGE"
-flash_rc=$?
-if [ "$flash_rc" -ne 0 ]; then
-  echo "! Flash or readback verification error: $flash_rc" >&2
-  save_image_to_storage new-boot.img
-  exit 1
+if [ "$FLASH_TO_DEVICE" = "true" ]; then
+  echo "- Flashing boot image"
+  flash_image new-boot.img "$BOOTIMAGE"
+  flash_rc=$?
+  if [ "$flash_rc" -ne 0 ]; then
+    echo "! Flash or readback verification error: $flash_rc" >&2
+    save_image_to_storage new-boot.img
+    exit 1
+  fi
+  echo "- Flash successful and verified"
+else
+  if ! save_image_to_storage new-boot.img; then
+    echo "! Could not save verified unpatched image" >&2
+    exit 1
+  fi
+  echo "- Successfully unpatched; image saved without flashing"
 fi
 
-echo "- Flash successful and verified"
 magiskboot cleanup >/dev/null 2>&1 || true
 rm -f kernel kernel.ori new-boot.img
 exit 0
