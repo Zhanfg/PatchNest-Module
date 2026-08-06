@@ -3,6 +3,10 @@
 /module/bin
 /out
 *.zip
+*.log
+*_log.tar.gz
+*_logs.tar.gz
+C*Temp*.tar.gz
 .DS_Store
 .audit/
 webui/.gstack/

@@ -1,7 +1,5 @@
 #!/bin/bash
-# P0-3 security fix: enable strict error handling.
-# Combined with `curl -fsSL` (also added in download_assets), this prevents
-# silent failures (e.g. 0-byte binaries shipping to end users).
+# PatchNest reproducible local build entry point.
 set -euo pipefail
 
 if [[ "${1:-}" == "clean" ]]; then
@@ -11,14 +9,29 @@ fi
 
 mkdir -p out module/bin module/webroot
 
-# Build WebUI
+# Build WebUI.
 cd webui
-pnpm build || { pnpm install && pnpm build; }
+pnpm build || { pnpm install --frozen-lockfile && pnpm build; }
 cd ..
 
-# Read versions from version.properties
+# Read versions and digests from version.properties using literal keys.
 get_ver() {
-    [ -f version.properties ] && grep "^$1[[:space:]]*=" version.properties | cut -d'=' -f2 | xargs | sed 's/^"//;s/"$//'
+    local key="$1"
+    [ -f version.properties ] || return 1
+    grep -F "${key}=" version.properties \
+        | head -n 1 \
+        | cut -d= -f2- \
+        | xargs \
+        | sed 's/^"//;s/"$//'
+}
+
+asset_digest_key() {
+    local asset_name="$1"
+    local tag="$2"
+    case "$asset_name" in
+        Magisk-*.apk) printf 'magisk_apk_%s\n' "$tag" ;;
+        *) printf '%s_%s\n' "${asset_name//[-.]/_}" "$tag" ;;
+    esac
 }
 
 download_assets() {
@@ -35,38 +48,37 @@ download_assets() {
         url="$url/tags/$tag"
     fi
 
-    # P0-3 fix: -f fails on HTTP errors, -s silent, -L follow redirects,
-    # combined with set -e the script aborts if GitHub returns 4xx/5xx.
     local release_json
     release_json=$(curl -fsSL "$url")
 
     for pattern in "${patterns[@]}"; do
         local regex="${pattern//\*/.*}"
         local asset_data
-        asset_data=$(echo "$release_json" | jq -r ".assets[] | select(.name | test(\"$regex\")) | .name + \"\t\" + .browser_download_url" | head -n 1)
+        asset_data=$(printf '%s' "$release_json" | jq -r ".assets[] | select(.name | test(\"$regex\")) | .name + \"\t\" + .browser_download_url" | head -n 1)
         if [[ -z "$asset_data" ]]; then
-            echo "ERROR: Could not find asset matching $pattern in $repo $tag" >&2
-            continue
+            echo "ERROR: could not find asset matching '$pattern' in $repo release $tag" >&2
+            exit 1
         fi
-        local asset_name=$(echo "$asset_data" | cut -f1)
-        local download_url=$(echo "$asset_data" | cut -f2)
+
+        local asset_name download_url
+        asset_name=$(printf '%s' "$asset_data" | cut -f1)
+        download_url=$(printf '%s' "$asset_data" | cut -f2)
         echo "Downloading $asset_name from $download_url"
         curl -fsSL "$download_url" -o "$outdir/$asset_name"
-
-        # P0-10 security fix: verify SHA256 of every downloaded root-level
-        # binary against the value pinned in version.properties. This blocks
-        # a compromised upstream or MITM from substituting a malicious
-        # kernel-level binary.
-        # Expected key: e.g. kpimg_linux_v0.13.3
-        local key="${asset_name//[-.]/_}_${tag}"
-        local expected
-        expected=$(get_ver "$key" || true)
-        if [[ -n "$expected" ]]; then
-            echo "$expected  $outdir/$asset_name" | sha256sum -c - \
-                || { echo "ERROR: SHA256 mismatch for $asset_name — refusing to ship unsigned root-level binary" >&2; exit 1; }
-        else
-            echo "WARNING: no pinned sha256 for $key in version.properties; skipping verification" >&2
+        if [[ ! -s "$outdir/$asset_name" ]]; then
+            echo "ERROR: downloaded asset is empty: $asset_name" >&2
+            exit 1
         fi
+
+        local key expected
+        key=$(asset_digest_key "$asset_name" "$tag")
+        expected=$(get_ver "$key" || true)
+        if [[ -z "$expected" ]]; then
+            echo "ERROR: no trusted SHA256 pinned for $key" >&2
+            exit 1
+        fi
+        echo "$expected  $outdir/$asset_name" | sha256sum -c - \
+            || { echo "ERROR: SHA256 mismatch for $asset_name" >&2; exit 1; }
     done
 }
 
@@ -77,52 +89,44 @@ VERSION_PATCHNEST="${VERSION_PATCHNEST:-latest}"
 VERSION_MAGISKBOOT=$(get_ver "magiskboot")
 VERSION_MAGISKBOOT="${VERSION_MAGISKBOOT:-latest}"
 
-# Fetch KernelPatch binaries (kpimg, kptools) from public fork
+# Fetch KernelPatch binaries from the public core repository.
 if [[ ! -f "module/bin/kpimg" || ! -f "module/bin/kptools" ]]; then
     download_assets "Zhanfg/KernelPatch-Public" "$VERSION_KERNELPATCH" "module/bin" "kpimg-linux" "kptools-android"
     mv module/bin/kpimg-linux module/bin/kpimg
     mv module/bin/kptools-android module/bin/kptools
 fi
 
-# Fetch kpatch user-space tool from PatchNest
-# (kpuser binary only available from PatchNest, not KernelPatch)
+# Fetch the PatchNest user-space tool.
 if [[ ! -f "module/bin/kpatch" ]]; then
     download_assets "Zhanfg/PatchNest" "$VERSION_PATCHNEST" "module/bin" "kpatch-android"
     mv module/bin/kpatch-android module/bin/kpatch
 fi
 
-# Fetch magiskboot
+# Fetch and extract magiskboot from the pinned official Magisk APK.
 if [[ ! -f "module/bin/magiskboot" ]]; then
     download_assets "topjohnwu/Magisk" "$VERSION_MAGISKBOOT" "module/bin" "Magisk*.apk"
 
-    # Use glob expansion directly instead of ls (avoids issues with
-    # filenames containing spaces/newlines and gives a clear error on
-    # no match).
     APK=$(printf '%s\n' module/bin/Magisk*.apk 2>/dev/null | head -n 1)
-    # P0-3 fix: ensure the APK actually exists before unzipping, and fail
-    # loudly if libmagiskboot.so is missing from the APK (path has changed
-    # historically).
     if [[ ! -f "$APK" ]]; then
-        echo "ERROR: no Magisk APK downloaded" >&2; exit 1
+        echo "ERROR: no Magisk APK downloaded" >&2
+        exit 1
     fi
     if ! unzip -p "$APK" 'lib/arm64-v8a/libmagiskboot.so' > "module/bin/magiskboot" 2>/dev/null; then
-        echo "ERROR: lib/arm64-v8a/libmagiskboot.so not found inside $APK" >&2; exit 1
+        echo "ERROR: lib/arm64-v8a/libmagiskboot.so not found inside $APK" >&2
+        exit 1
     fi
     if [[ ! -s "module/bin/magiskboot" ]]; then
-        echo "ERROR: extracted magiskboot is empty" >&2; exit 1
+        echo "ERROR: extracted magiskboot is empty" >&2
+        exit 1
     fi
     rm "$APK"
 fi
 
-# Build kp-safemode helper (queries SUPERCALL_SU_GET_SAFEMODE).
-# Cross-compile with Android NDK clang when available; skip on local builds
-# where the toolchain isn't installed (the WebUI handles missing-binary
-# gracefully).
-if [[ ! -f "module/bin/kp-safemode" && -n "$ANDROID_NDK_HOME" ]]; then
+# Build kp-safemode when an Android NDK is available locally.
+if [[ ! -f "module/bin/kp-safemode" && -n "${ANDROID_NDK_HOME:-}" ]]; then
     echo "Building kp-safemode with NDK clang..."
     NDK_CLANG="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
     if [[ ! -x "$NDK_CLANG" ]]; then
-        # Fall back to the generic clang if the API-level-prefixed one is missing.
         NDK_CLANG="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
     fi
     if [[ -x "$NDK_CLANG" ]]; then
@@ -134,21 +138,14 @@ if [[ ! -f "module/bin/kp-safemode" && -n "$ANDROID_NDK_HOME" ]]; then
     fi
 fi
 
-# Note: the anti-detect KPM suite (module/kpms/*.c) used to be built
-# inline here. As of v0.3.0-rc7, KPMs are no longer built into the
-# PatchNest module. They are distributed via the standalone
-# Kpm-Repo at https://github.com/Zhanfg/Kpm-Repo and consumed by
-# the WebUI's KPM Repository page. Users can add custom KPM
-# repositories (including their own forks) without rebuilding the
-# PatchNest module. See Kpm-Repo/README.md for the forker guide.
-#
-# The module/kpms/ source files have been moved to
-# https://github.com/Zhanfg/Kpm-Repo/tree/main/modules.
+# KPM sources and catalog artifacts are maintained independently in:
+# https://github.com/Zhanfg/PatchNest-Kpms
+# PatchNest-Module consumes the generated catalog at runtime and does not
+# bundle catalog KPM binaries into the module archive.
 
-# zip module
 commit_number=$(git rev-list --count HEAD)
 commit_hash=$(git rev-parse --short HEAD)
 
 cd module
-zip -r ../out/PatchNest-${commit_number}-${commit_hash}.zip .
+zip -r "../out/PatchNest-${commit_number}-${commit_hash}.zip" .
 cd ..
