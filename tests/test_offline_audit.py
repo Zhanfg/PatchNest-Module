@@ -34,18 +34,22 @@ verify_block_image_prefix() { return 0; }
 flash_image() {
   blockdev --getsize64 "$2"
   blockdev --getro "$2"
+  echo "Character-device boot flashing is not verified and is disabled"
   verify_block_image_prefix "$1" "$2" 1 4096
 }
 '''
 
 SAFE_PATCH = r'''#!/system/bin/sh
+validate_boot_image() { magiskboot unpack "$1"; }
 STAMP=$(date +%Y%m%d%H%M%S)
 backup_sha256="abc"
 backup_verified=true
-magiskboot unpack backup.img
+echo "Refusing to replace recovery backup with an already patched boot image"
+validate_boot_image backup.img
 '''
 
 SAFE_UNPATCH = r'''#!/system/bin/sh
+partition_name_for_target() { echo boot_a; }
 backup_verified=true
 backup_sha256="abc"
 boot_image="boot_a"
