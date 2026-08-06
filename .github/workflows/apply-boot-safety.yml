@@ -1,0 +1,552 @@
+name: Apply boot safety hardening
+
+on:
+  push:
+    branches:
+      - restart/boot-safety-audit
+    paths:
+      - .github/workflows/apply-boot-safety.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: restart/boot-safety-audit
+
+      - name: Apply fail-closed boot safety changes
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace(path: str, old: str, new: str, count: int = 1) -> None:
+              file = Path(path)
+              text = file.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'anchor not found in {path}: {old[:120]!r}')
+              file.write_text(text.replace(old, new, count), encoding='utf-8')
+
+          def replace_between(path: str, start: str, end: str, replacement: str) -> None:
+              file = Path(path)
+              text = file.read_text(encoding='utf-8')
+              start_index = text.find(start)
+              end_index = text.find(end, start_index)
+              if start_index < 0 or end_index < 0:
+                  raise SystemExit(f'block anchors not found in {path}')
+              file.write_text(
+                  text[:start_index] + replacement + text[end_index:],
+                  encoding='utf-8',
+              )
+
+          replace_between(
+              'module/patch/util_functions.sh',
+              'flash_image() {\n',
+              'save_image_to_storage() {\n',
+              r'''image_stream_size() {
+            case "$1" in
+              *.gz) gzip -dc "$1" 2>/dev/null | wc -c | tr -d ' ' ;;
+              *) stat -c '%s' "$1" 2>/dev/null ;;
+            esac
+          }
+
+          image_stream_sha256() {
+            command -v sha256sum >/dev/null 2>&1 || return 1
+            case "$1" in
+              *.gz) gzip -dc "$1" 2>/dev/null | sha256sum | awk '{print $1}' ;;
+              *) sha256sum "$1" 2>/dev/null | awk '{print $1}' ;;
+            esac
+          }
+
+          verify_block_image_prefix() {
+            local _source="$1"
+            local _target="$2"
+            local _size="$3"
+            local _bs="$4"
+            local _blocks _expected _actual
+
+            command -v head >/dev/null 2>&1 || return 1
+            command -v sha256sum >/dev/null 2>&1 || return 1
+            [ "$_size" -gt 0 ] 2>/dev/null || return 1
+            [ "$_bs" -gt 0 ] 2>/dev/null || _bs=4096
+
+            _blocks=$(((_size + _bs - 1) / _bs))
+            _expected=$(image_stream_sha256 "$_source") || return 1
+            [ -n "$_expected" ] || return 1
+            _actual=$(dd if="$_target" bs="$_bs" count="$_blocks" iflag=fullblock 2>/dev/null \
+              | head -c "$_size" \
+              | sha256sum \
+              | awk '{print $1}')
+            [ -n "$_actual" ] || return 1
+            [ "$_actual" = "$_expected" ]
+          }
+
+          flash_image() {
+            local _source="$1"
+            local _target="$2"
+            local _rc=0
+            local _img_sz _blk_sz _blk_bs _blk_ro
+
+            [ -s "$_source" ] || {
+              echo "! Flash source missing or empty: $_source" >&2
+              return 3
+            }
+            [ -e "$_target" ] || {
+              echo "! Flash target does not exist: $_target" >&2
+              return 4
+            }
+
+            _img_sz=$(image_stream_size "$_source")
+            [ "$_img_sz" -gt 0 ] 2>/dev/null || {
+              echo "! Cannot determine non-zero source size: $_source" >&2
+              return 3
+            }
+
+            if [ -b "$_target" ]; then
+              _blk_sz=$(blockdev --getsize64 "$_target" 2>/dev/null)
+              _blk_bs=$(blockdev --getbsz "$_target" 2>/dev/null)
+              [ "$_blk_sz" -gt 0 ] 2>/dev/null || return 4
+              [ "$_blk_bs" -gt 0 ] 2>/dev/null || _blk_bs=4096
+              [ "$_img_sz" -le "$_blk_sz" ] || return 1
+              blockdev --setrw "$_target" >/dev/null 2>&1 || return 2
+              _blk_ro=$(blockdev --getro "$_target" 2>/dev/null)
+              [ "$_blk_ro" = "0" ] || return 2
+
+              case "$_source" in
+                *.gz) gzip -dc "$_source" 2>/dev/null \
+                  | dd of="$_target" bs="$_blk_bs" iflag=fullblock conv=notrunc,fsync 2>/dev/null ;;
+                *) cat "$_source" \
+                  | dd of="$_target" bs="$_blk_bs" iflag=fullblock conv=notrunc,fsync 2>/dev/null ;;
+              esac
+              _rc=$?
+              sync
+              [ "$_rc" -eq 0 ] || return 5
+
+              if ! verify_block_image_prefix "$_source" "$_target" "$_img_sz" "$_blk_bs"; then
+                echo "! Flash readback verification failed: $_target" >&2
+                return 6
+              fi
+            elif [ -c "$_target" ]; then
+              flash_eraseall "$_target" >&2 || return 5
+              case "$_source" in
+                *.gz) gzip -dc "$_source" 2>/dev/null | nandwrite -p "$_target" - >&2 ;;
+                *) cat "$_source" | nandwrite -p "$_target" - >&2 ;;
+              esac
+              _rc=$?
+              [ "$_rc" -eq 0 ] || return 5
+            else
+              echo "- Not block or char device, storing image"
+              case "$_source" in
+                *.gz) gzip -dc "$_source" > "$_target" 2>/dev/null ;;
+                *) cat "$_source" > "$_target" 2>/dev/null ;;
+              esac
+              _rc=$?
+              [ "$_rc" -eq 0 ] && [ -s "$_target" ] || return 5
+            fi
+            return 0
+          }
+
+          ''',
+          )
+
+          replace(
+              'module/patch/boot_patch.sh',
+              '  "original_sha256": "$SAFE_SHA",\n  "backup_verified": false',
+              '  "original_sha256": "$SAFE_SHA",\n  "backup_sha256": "null",\n  "backup_verified": false',
+          )
+          replace(
+              'module/patch/boot_patch.sh',
+              '''TMP_DATE=$(date +%y%m%d%H%M)
+          TMP_BACKUP="$BACKUP_DIR/boot_backup_${TMP_DATE}.img"
+          TMP_MANIFEST="$BACKUP_DIR/boot_backup_${TMP_DATE}.json"''',
+              '''TMP_DATE=$(date +%y%m%d%H%M%S)
+          TMP_BACKUP="$BACKUP_DIR/boot_backup_${TMP_DATE}_$$.img"
+          TMP_MANIFEST="$BACKUP_DIR/boot_backup_${TMP_DATE}_$$.json"''',
+          )
+          replace(
+              'module/patch/boot_patch.sh',
+              '''    cp "$BOOTIMAGE" "ori.img" >/dev/null 2>&1
+              cp "$BOOTIMAGE" "$TMP_BACKUP"
+              echo "- Boot backup saved to $TMP_BACKUP"
+          ''',
+              '''    if ! cp "$BOOTIMAGE" "ori.img" >/dev/null 2>&1 \
+                 || ! cp "$BOOTIMAGE" "$TMP_BACKUP"; then
+                  >&2 echo "! Failed to create boot backup — refusing to patch."
+                  rm -f "$TMP_BACKUP" "$TMP_MANIFEST" ori.img
+                  exit 1
+              fi
+              if [ ! -s "$TMP_BACKUP" ]; then
+                  >&2 echo "! Captured boot backup is empty — refusing to patch."
+                  rm -f "$TMP_BACKUP" "$TMP_MANIFEST" ori.img
+                  exit 1
+              fi
+              echo "- Boot backup saved to $TMP_BACKUP"
+          ''',
+          )
+          replace(
+              'module/patch/boot_patch.sh',
+              '''    sed 's/"backup_verified"[[:space:]]*:[[:space:]]*false/"backup_verified": true/' "$TMP_MANIFEST" > "$TMP_MANIFEST.final"
+              mv "$TMP_MANIFEST.final" "$TMP_MANIFEST"
+              echo "- Manifest finalized: $TMP_MANIFEST"
+          ''',
+              '''    BACKUP_SHA=$(image_stream_sha256 "$TMP_BACKUP")
+              if ! printf '%s' "$BACKUP_SHA" | grep -Eq '^[0-9a-f]{64}$'; then
+                  >&2 echo "! Could not calculate backup SHA256 — refusing to patch."
+                  rm -f "$TMP_BACKUP" "$TMP_MANIFEST" "$TMP_MANIFEST.final"
+                  exit 1
+              fi
+              sed \
+                  -e 's/"backup_verified"[[:space:]]*:[[:space:]]*false/"backup_verified": true/' \
+                  -e "s/\"backup_sha256\"[[:space:]]*:[[:space:]]*\"null\"/\"backup_sha256\": \"$BACKUP_SHA\"/" \
+                  "$TMP_MANIFEST" > "$TMP_MANIFEST.final"
+              mv "$TMP_MANIFEST.final" "$TMP_MANIFEST"
+              echo "- Manifest finalized: $TMP_MANIFEST"
+          ''',
+          )
+          replace(
+              'module/patch/boot_patch.sh',
+              '''            else
+                          # kptools -l might not work for all formats, just warn
+                          echo "  ⚠ Cannot verify with kptools: $kpm_file (proceeding)"
+                      fi
+          ''',
+              '''            else
+                          echo "! Cannot verify embedded KPM with kptools: $kpm_file"
+                          validate_failed=1
+                      fi
+          ''',
+          )
+          replace(
+              'module/patch/boot_patch.sh',
+              '''if [ $patch_rc -ne 0 ]; then
+            >&2 echo "! Patch kernel error: $patch_rc"
+            exit 1
+          fi
+          ''',
+              '''if [ $patch_rc -ne 0 ]; then
+            >&2 echo "! Patch kernel error: $patch_rc"
+            rm -f kernel
+            mv kernel.ori kernel 2>/dev/null || true
+            exit 1
+          fi
+          ''',
+          )
+          replace(
+              'module/patch/boot_patch.sh',
+              '''if ! magiskboot repack "$BOOTIMAGE" >/dev/null 2>&1; then
+            >&2 echo "! Repack error"
+            exit 1
+          fi
+
+          if [ "$FLASH_TO_DEVICE" = "true" ]; then
+            # flash
+            if [ -b "$BOOTIMAGE" ] || [ -c "$BOOTIMAGE" ]; then
+              if [ -f "new-boot.img" ]; then
+                echo "- Flashing new boot image"
+                flash_image new-boot.img "$BOOTIMAGE"
+                if [ $? -ne 0 ]; then
+                  >&2 echo "! Flash error"
+                  save_image_to_storage "new-boot.img"
+                  exit 1
+                fi
+              else
+                >&2 echo "! new-boot.img missing — refusing to flash"
+                exit 1
+              fi
+            fi
+
+            echo "- Successfully Flashed!"
+          else
+            save_image_to_storage "new-boot.img"
+            echo "- Successfully Patched!"
+          fi
+          ''',
+              '''if ! magiskboot repack "$BOOTIMAGE" >/dev/null 2>&1; then
+            >&2 echo "! Repack error"
+            exit 1
+          fi
+
+          if [ ! -s "new-boot.img" ]; then
+            >&2 echo "! Repack produced no non-empty new-boot.img"
+            exit 1
+          fi
+          echo "- Validating patched boot image with magiskboot unpack…"
+          PATCH_VALIDATE_TMP=$(mktemp -d)
+          if ! (cd "$PATCH_VALIDATE_TMP" && magiskboot unpack "$OLDPWD/new-boot.img" >/dev/null 2>&1); then
+            >&2 echo "! Patched boot image validation failed — refusing to flash."
+            rm -rf "$PATCH_VALIDATE_TMP"
+            save_image_to_storage "new-boot.img"
+            exit 1
+          fi
+          rm -rf "$PATCH_VALIDATE_TMP"
+          PATCHED_SHA=$(image_stream_sha256 "new-boot.img")
+          echo "- Patched image SHA256: $PATCHED_SHA"
+
+          if [ "$FLASH_TO_DEVICE" = "true" ]; then
+            if [ ! -b "$BOOTIMAGE" ] && [ ! -c "$BOOTIMAGE" ]; then
+              >&2 echo "! Flash requested but target is not a block or character device: $BOOTIMAGE"
+              save_image_to_storage "new-boot.img"
+              exit 1
+            fi
+            echo "- Flashing new boot image"
+            flash_image new-boot.img "$BOOTIMAGE"
+            flash_rc=$?
+            if [ "$flash_rc" -ne 0 ]; then
+              >&2 echo "! Flash or readback verification error: $flash_rc"
+              save_image_to_storage "new-boot.img"
+              exit 1
+            fi
+            echo "- Successfully Flashed and Verified!"
+          else
+            save_image_to_storage "new-boot.img"
+            echo "- Successfully Patched!"
+          fi
+          ''',
+          )
+
+          replace_between(
+              'module/patch/boot_unpatch.sh',
+              'auto_unpatch() {\n',
+              '\n[ -e "$BOOTIMAGE" ] ||',
+              r'''auto_unpatch() {
+              if [ -z "$BOOTIMAGE" ] || [ ! -e "$BOOTIMAGE" ]; then
+                  >&2 echo "! auto_unpatch: BOOTIMAGE not set or missing ($BOOTIMAGE)"
+                  return 1
+              fi
+              command -v flash_image >/dev/null 2>&1 || return 2
+              [ -d "$BACKUP_DIR" ] || return 3
+
+              target_real=$(readlink -f "$BOOTIMAGE" 2>/dev/null || printf '%s' "$BOOTIMAGE")
+              target_name=$(basename "$target_real")
+              selected_backup=""
+
+              for candidate in $(ls -1t "$BACKUP_DIR"/boot_backup_*.img 2>/dev/null); do
+                  [ -s "$candidate" ] || continue
+                  manifest="${candidate%.img}.json"
+                  [ -f "$manifest" ] || continue
+
+                  verified=$(grep -o '"backup_verified"[[:space:]]*:[[:space:]]*[a-z]*' "$manifest" 2>/dev/null \
+                      | head -n 1 | sed -E 's/.*:[[:space:]]*([a-z]*).*/\1/')
+                  [ "$verified" = "true" ] || continue
+
+                  recorded_name=$(grep -o '"boot_image"[[:space:]]*:[[:space:]]*"[^"]*"' "$manifest" 2>/dev/null \
+                      | head -n 1 | sed -E 's/.*:[[:space:]]*"([^"]*)".*/\1/')
+                  [ "$recorded_name" = "$target_name" ] || continue
+
+                  recorded_sha=$(grep -o '"backup_sha256"[[:space:]]*:[[:space:]]*"[^"]*"' "$manifest" 2>/dev/null \
+                      | head -n 1 | sed -E 's/.*:[[:space:]]*"([^"]*)".*/\1/')
+                  if [ -n "$recorded_sha" ] && [ "$recorded_sha" != "null" ]; then
+                      actual_sha=$(image_stream_sha256 "$candidate")
+                      [ "$actual_sha" = "$recorded_sha" ] || continue
+                  fi
+
+                  validate_tmp=$(mktemp -d)
+                  if (cd "$validate_tmp" && magiskboot unpack "$candidate" >/dev/null 2>&1); then
+                      selected_backup="$candidate"
+                      rm -rf "$validate_tmp"
+                      break
+                  fi
+                  rm -rf "$validate_tmp"
+              done
+
+              if [ -z "$selected_backup" ]; then
+                  >&2 echo "! auto_unpatch: no verified backup matches target $target_name"
+                  return 4
+              fi
+
+              echo "- auto_unpatch: verified backup: $selected_backup"
+              if ! flash_image "$selected_backup" "$BOOTIMAGE"; then
+                  >&2 echo "! auto_unpatch: flash/readback verification failed"
+                  return 5
+              fi
+
+              echo "0" > "$PNDIR/boot_count" 2>/dev/null
+              echo "- auto_unpatch: flash successful and verified"
+              return 0
+          }
+          ''',
+          )
+
+          replace(
+              'module/patch/boot_unpatch.sh',
+              '''command -v kptools >/dev/null 2>&1 || { echo "- Command kptools not found!"; exit 1; }
+
+          if [ ! -f kernel ]; then
+          ''',
+              '''command -v kptools >/dev/null 2>&1 || { echo "- Command kptools not found!"; exit 1; }
+
+          # Never reuse artifacts left by an interrupted previous operation.
+          rm -f kernel kernel.ori new-boot.img
+
+          if [ ! -f kernel ]; then
+          ''',
+          )
+          replace_between(
+              'module/patch/boot_unpatch.sh',
+              '''if [ -n "$(kptools -i kernel -l 2>/dev/null | grep patched=true)" ]; then
+          ''',
+              '''echo "- Flash successful"
+          ''',
+              r'''if [ -n "$(kptools -i kernel -l 2>/dev/null | grep patched=true)" ]; then
+            echo "- kernel has been patched"
+            mv kernel kernel.ori
+            echo "- Unpatching kernel"
+            if ! kptools -u --image kernel.ori --out kernel; then
+              >&2 echo "! Unpatch error"
+              exit 1
+            fi
+            echo "- Repacking boot image"
+            if ! magiskboot repack "$BOOTIMAGE" >/dev/null 2>&1; then
+              >&2 echo "! Repack error"
+              exit 1
+            fi
+          else
+            echo "- no need unpatch"
+            exit 0
+          fi
+
+          if [ ! -s "new-boot.img" ]; then
+            >&2 echo "! Unpatch repack produced no non-empty new-boot.img"
+            exit 1
+          fi
+          echo "- Validating unpatched boot image"
+          validate_tmp=$(mktemp -d)
+          if ! (cd "$validate_tmp" && magiskboot unpack "$OLDPWD/new-boot.img" >/dev/null 2>&1); then
+            rm -rf "$validate_tmp"
+            >&2 echo "! Unpatched boot image validation failed"
+            exit 1
+          fi
+          rm -rf "$validate_tmp"
+
+          if [ ! -b "$BOOTIMAGE" ] && [ ! -c "$BOOTIMAGE" ]; then
+            >&2 echo "! Refusing to flash non-device target: $BOOTIMAGE"
+            save_image_to_storage "new-boot.img"
+            exit 1
+          fi
+
+          echo "- Flashing boot image"
+          flash_image new-boot.img "$BOOTIMAGE"
+          flash_rc=$?
+          if [ "$flash_rc" -ne 0 ]; then
+            >&2 echo "! Flash or readback verification error: $flash_rc"
+            save_image_to_storage "new-boot.img"
+            exit 1
+          fi
+
+          echo "- Flash successful and verified"
+          ''',
+          )
+
+          Path('tests/validate_boot_safety.js').write_text(
+              r'''#!/usr/bin/env node
+          'use strict';
+
+          const fs = require('node:fs');
+          const assert = require('node:assert/strict');
+
+          const util = fs.readFileSync('module/patch/util_functions.sh', 'utf8');
+          const patch = fs.readFileSync('module/patch/boot_patch.sh', 'utf8');
+          const unpatch = fs.readFileSync('module/patch/boot_unpatch.sh', 'utf8');
+
+          function contains(text, needle, message) {
+            assert.ok(text.includes(needle), message);
+          }
+
+          contains(util, 'verify_block_image_prefix()', 'block readback verification helper missing');
+          contains(util, '[ -s "$_source" ]', 'empty flash sources are not rejected');
+          contains(util, 'return 6', 'readback mismatch does not have a hard failure code');
+          contains(util, 'blockdev --setrw "$_target"', 'setrw result is not checked');
+          contains(util, 'flash_eraseall "$_target" >&2 || return 5', 'MTD erase failure is ignored');
+
+          contains(patch, 'date +%y%m%d%H%M%S', 'backup filenames lack second-level uniqueness');
+          contains(patch, 'backup_sha256', 'backup digest is not persisted');
+          contains(patch, 'Validating patched boot image', 'patched image is not validated before flash');
+          contains(patch, 'Successfully Flashed and Verified', 'patch path does not require readback verification');
+          contains(patch, 'target is not a block or character device', 'patch path can report false flash success');
+          assert.ok(!patch.includes('(proceeding)'), 'unverified embedded KPMs still proceed');
+
+          contains(unpatch, 'rm -f kernel kernel.ori new-boot.img', 'stale work artifacts are reusable');
+          contains(unpatch, 'no verified backup matches target', 'auto recovery is not target-bound');
+          contains(unpatch, 'backup_verified', 'auto recovery accepts unverified backup manifests');
+          contains(unpatch, 'backup_sha256', 'auto recovery does not verify stored backup digest');
+          contains(unpatch, 'Validating unpatched boot image', 'normal unpatch output is not validated');
+          contains(unpatch, 'Flash successful and verified', 'unpatch path lacks readback verification');
+          assert.ok(!unpatch.includes('found backup boot.img ,use it for recovery'), 'stale new-boot.img branch remains');
+
+          console.log('Boot safety invariants validated.');
+          ''',
+              encoding='utf-8',
+          )
+
+          Path('docs/restart/BOOT_SAFETY_AUDIT.md').write_text(
+              '''# PatchNest boot safety audit
+
+          Audit date: 2026-08-06
+
+          ## Confirmed defects
+
+          1. Backup names had minute-only resolution and could overwrite during repeated operations.
+          2. Backup copy failures and empty backups were not checked before patching.
+          3. Backup manifests had no digest for later recovery validation.
+          4. Embedded KPM validation could fail and still continue.
+          5. Repacked images were not unpack-tested before flashing.
+          6. A requested flash to a regular file could be reported as successful without flashing a device.
+          7. Block-device writes were not read back and compared with the source image.
+          8. Auto recovery selected the newest image by mtime without binding it to the target partition.
+          9. Auto recovery accepted manifest-less legacy images.
+          10. Normal unpatch could reuse a stale `new-boot.img` from an interrupted operation.
+
+          ## Remediation
+
+          - Backup filenames now include seconds and the shell PID.
+          - Backup copy, size, unpack validation and SHA-256 are mandatory.
+          - Auto recovery requires a verified manifest whose `boot_image` matches the target partition; stored digests are enforced when present.
+          - Generated patched and unpatched images must pass `magiskboot unpack` before flash.
+          - Direct flash requires a block or character device.
+          - Block-device writes are read back for the exact source length and SHA-256 compared.
+          - Stale work artifacts are removed before normal unpatch.
+          - Embedded KPM validation is fail-closed.
+
+          ## Remaining device gates
+
+          Static and mocked CI cannot prove boot success. Before release, test patch, reboot, unpatch, forced recovery and rollback on supported A/B and non-A/B devices. Character-device NAND flashing still cannot use the block-prefix readback helper and requires separate physical validation.
+          ''',
+              encoding='utf-8',
+          )
+
+          replace(
+              '.github/workflows/build.yaml',
+              '''      - name: Validate checked-in KPM fixtures
+                  run: node tests/validate_kpm.js
+          ''',
+              '''      - name: Validate checked-in KPM fixtures
+                  run: node tests/validate_kpm.js
+
+                - name: Validate boot safety invariants
+                  run: node tests/validate_boot_safety.js
+          ''',
+          )
+          PY
+
+      - name: Validate generated changes
+        run: |
+          set -euo pipefail
+          bash -n module/patch/util_functions.sh
+          bash -n module/patch/boot_patch.sh
+          bash -n module/patch/boot_unpatch.sh
+          node tests/validate_boot_safety.js
+
+      - name: Remove one-time workflow and commit
+        run: |
+          set -euo pipefail
+          rm .github/workflows/apply-boot-safety.yml
+          git config user.name patchnest-boot-safety-bot
+          git config user.email patchnest-boot-safety-bot@users.noreply.github.com
+          git add module/patch tests/validate_boot_safety.js docs/restart/BOOT_SAFETY_AUDIT.md .github/workflows
+          git commit -m "fix(boot): make backup flash and recovery fail closed"
+          git push origin HEAD:restart/boot-safety-audit
