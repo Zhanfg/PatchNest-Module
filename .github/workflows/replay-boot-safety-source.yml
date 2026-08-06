@@ -10,16 +10,31 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: patchnest-boot-safety-replay
+  cancel-in-progress: true
+
 jobs:
   replay:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout branch
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           ref: restart/boot-safety-audit
 
+      - name: Detect already-applied source changes
+        id: existing
+        run: |
+          if grep -q 'verify_block_image_prefix()' module/patch/util_functions.sh \
+             && test -f tests/validate_boot_safety.js; then
+            echo 'applied=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'applied=false' >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Extract and replay validated transformation
+        if: steps.existing.outputs.applied != 'true'
         run: |
           set -euo pipefail
           awk '
@@ -31,6 +46,7 @@ jobs:
           python3 /tmp/apply_boot_safety.py
 
       - name: Keep workflow files outside the source commit
+        if: steps.existing.outputs.applied != 'true'
         run: |
           set -euo pipefail
           git checkout -- .github/workflows/build.yaml
@@ -45,6 +61,7 @@ jobs:
           node tests/validate_boot_safety.js
 
       - name: Commit only source tests and documentation
+        if: steps.existing.outputs.applied != 'true'
         run: |
           set -euo pipefail
           git config user.name patchnest-boot-safety-bot
