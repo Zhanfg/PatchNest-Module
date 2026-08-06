@@ -12,8 +12,33 @@ import { escapeHTML, sanitizeUrl, formatSize } from '../utils.js';
 // as additional subscriptions via the WebUI's "Add Repository"
 // button.
 const DEFAULT_REPO_URL = 'https://raw.githubusercontent.com/Zhanfg/PatchNest-Kpms/main/kpm_repo.json';
+const RETIRED_REPO_URLS = new Set([
+    'https://raw.githubusercontent.com/Zhanfg/Kpm-Repo/main/kpm_repo.json',
+    'https://raw.githubusercontent.com/Zhanfg/KPatch-Next-Module/main/kpm_repo.json',
+]);
 const REPOS_KEY = 'patchnest_repos';
 const SYSTEM_REPOS_PATH = '/data/adb/patchnest/repos.json';
+
+function normalizeStoredRepos(repos) {
+    const normalized = [];
+    const seen = new Set();
+    for (const repo of repos) {
+        if (!repo || typeof repo.url !== 'string') continue;
+        const originalUrl = repo.url.trim();
+        if (!originalUrl) continue;
+        const retired = RETIRED_REPO_URLS.has(originalUrl);
+        const url = retired ? DEFAULT_REPO_URL : originalUrl;
+        if (seen.has(url)) continue;
+        seen.add(url);
+        const name = retired
+            ? getString('repo_official')
+            : (typeof repo.name === 'string' && repo.name.trim()
+                ? repo.name.trim()
+                : 'Repository');
+        normalized.push({ url, name });
+    }
+    return normalized;
+}
 
 /**
  * Repo list shape in localStorage:
@@ -47,13 +72,22 @@ function getRepos() {
     // Migrate the legacy single-URL key if present.
     const legacy = localStorage.getItem('patchnest_repo_url');
     if (legacy && !localStorage.getItem(REPOS_KEY)) {
-        const migrated = [{ url: legacy, name: 'Main' }];
+        const migrated = normalizeStoredRepos([{ url: legacy, name: 'Main' }]);
         localStorage.setItem(REPOS_KEY, JSON.stringify(migrated));
         localStorage.removeItem('patchnest_repo_url');
     }
     try {
         const parsed = JSON.parse(localStorage.getItem(REPOS_KEY) || 'null');
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+            const normalized = normalizeStoredRepos(parsed);
+            if (normalized.length > 0) {
+                const serialized = JSON.stringify(normalized);
+                if (serialized !== localStorage.getItem(REPOS_KEY)) {
+                    localStorage.setItem(REPOS_KEY, serialized);
+                }
+                return normalized;
+            }
+        }
     } catch (_) {}
     // First-run default.
     return [{ url: DEFAULT_REPO_URL, name: getString('repo_official') }];
