@@ -35,11 +35,18 @@ def reject(text: str, token: str, message: str) -> None:
         raise AssertionError(message)
 
 
+def require_regex(text: str, pattern: str, message: str) -> None:
+    if not re.search(pattern, text, re.MULTILINE):
+        raise AssertionError(message)
+
+
 def main() -> int:
     guard = read("module/patch/flash_guard.sh")
     patch = read("module/patch/boot_patch.sh")
     unpatch = read("module/patch/boot_unpatch.sh")
     extract = read("module/patch/boot_extract.sh")
+    post_fs = read("module/post-fs-data.sh")
+    collector = read("scripts/collect_device_evidence.sh")
 
     for script_name, script in {
         "boot_patch.sh": patch,
@@ -48,10 +55,7 @@ def main() -> int:
     }.items():
         require(script, '. "$MODPATH/flash_guard.sh"', f"{script_name} does not source flash_guard.sh")
 
-    for forbidden in (
-        "vendor_boot",
-        "init_boot",
-    ):
+    for forbidden in ("vendor_boot", "init_boot"):
         require(guard, forbidden, f"flash guard does not explicitly reject {forbidden}")
 
     require(guard, "PARTNAME=", "partition validation does not inspect sysfs PARTNAME")
@@ -61,29 +65,45 @@ def main() -> int:
     require(guard, "Flash readback verification failed", "readback mismatch is not surfaced")
     require(guard, "Character-device boot flashing is not verified and is disabled", "unverified NAND writes are not fail-closed")
     require(guard, "Saved image SHA256", "saved image copy is not digest-verified")
+    require(guard, "partition_name_for_target", "logical partition resolution helper is missing")
 
+    require(patch, "resolve_kpimg", "kpimg location is not resolved across module/tmp layouts")
+    require(patch, '"$MODPATH/../bin/kpimg"', "installed kpimg path is not considered")
+    require(patch, '"$PWD/kpimg"', "WebUI temporary kpimg path is not considered")
+    require(patch, 'readlink -f "$_image"', "independent image validation does not use an absolute path")
     require(patch, "backup_sha256", "backup digest is absent from manifest")
     require(patch, "backup_verified", "backup verification state is absent from manifest")
     require(patch, "date +%Y%m%d%H%M%S", "backup name lacks second-level uniqueness")
-    require(patch, "_$$.img", "backup name lacks process-level uniqueness")
+    require_regex(patch, r"boot_backup_\$\{_stamp\}_\$\$\.img", "backup name lacks process-level uniqueness")
     require(patch, "validate_embedded_kpms", "embedded KPM verification helper missing")
     require(patch, "cannot be verified by kptools", "embedded KPM verification is not fail-closed")
     require(patch, "Patched boot image failed independent unpack verification", "repacked patch image is not independently validated")
     require(patch, "Patched kernel does not report patched=true", "patched kernel state is not checked")
+    require(patch, "Refusing to replace recovery backup with an already patched boot image", "forced backup can replace recovery base with a patched image")
     reject(patch, "set -x", "boot patcher enables shell tracing and may expose a superkey")
     reject(patch, "(proceeding)", "unverified embedded KPMs still proceed")
 
     require(unpatch, "rm -f kernel kernel.ori new-boot.img", "stale work artifacts are not removed")
     require(unpatch, "select_verified_backup", "verified backup selection helper missing")
+    require(unpatch, "partition_name_for_target", "recovery target comparison does not use the logical partition name")
     require(unpatch, "backup_sha256", "recovery does not enforce backup digest")
     require(unpatch, "backup_verified", "recovery does not enforce verification state")
+    require(unpatch, 'readlink -f "$_image"', "unpatch validation does not use an absolute path")
     require(unpatch, "Generated kernel still reports patched=true", "unpatch output state is not checked")
     require(unpatch, "Unpatched boot image validation failed", "repacked unpatch image is not independently validated")
     require(unpatch, "Flash successful and verified", "unpatch does not require readback verification")
     reject(unpatch, "found backup boot.img", "stale new-boot.img recovery branch remains")
+    reject(unpatch, "if ! flash_image", "negated flash command can hide the original error code")
 
     require(extract, "assert_kernel_boot_target", "boot discovery result is not checked")
     require(extract, "Discovered partition is not a supported KernelPatch boot target", "invalid target error is missing")
+
+    require(post_fs, '"automatic_flash_performed": false', "early-boot state incorrectly claims a restore occurred")
+    require(post_fs, '"required_next_step": "select_target_bound_verified_backup"', "recovery request lacks its required verification step")
+    reject(post_fs, "flash_image", "post-fs-data must not write a boot block device")
+
+    require(collector, "/data/adb/patchnest/backup", "evidence collector ignores the current backup directory")
+    require(collector, "No block device was written", "collector lacks an explicit read-only sharing notice")
 
     # Guard against accidental reintroduction of minute-only backup names.
     if re.search(r"date \+%[yY][^\n]*%M(?![^\n]*%S)", patch):
