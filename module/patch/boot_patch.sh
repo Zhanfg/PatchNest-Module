@@ -17,6 +17,7 @@ FLASH_TO_DEVICE=${2:-false}
 
 . "$MODPATH/util_functions.sh"
 . "$MODPATH/flash_guard.sh"
+. "$MODPATH/kptools_argv.sh"
 
 fail() {
   echo "! $*" >&2
@@ -180,7 +181,6 @@ if [ "$FLASH_TO_DEVICE" = "true" ]; then
   assert_kernel_boot_target "$BOOTIMAGE" || exit 1
 fi
 
-# Never reuse files left by a previous interrupted operation.
 magiskboot cleanup >/dev/null 2>&1 || true
 rm -f kernel kernel.ori new-boot.img ori.img
 
@@ -215,7 +215,7 @@ validate_embedded_kpms "$@" || exit 1
 mv kernel kernel.ori || fail "Could not preserve original kernel payload"
 echo "- Patching kernel"
 # Do not enable shell tracing here: kptools arguments may include a superkey.
-if ! kptools -p -i kernel.ori -k "$KPIMG" -o kernel "$@"; then
+if ! run_patchnest_kptools_patch "$@"; then
   rm -f kernel
   mv kernel.ori kernel 2>/dev/null || true
   fail "Kernel patch failed"
