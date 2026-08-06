@@ -2,65 +2,47 @@
 
 **English** | [中文](README_zh-CN.md)
 
-Standalone implementation of KPM support for Magisk / KernelSU / APatch
+PatchNest Module provides a KPM host and management WebUI for Magisk, KernelSU, KernelSU-Next and APatch. It is maintained as a downstream project of `KernelSU-Next/KPatch-Next-Module` with an independent release and dependency chain.
 
----
+## Repository architecture
 
-## KPM Module Repository
+| Repository | Responsibility |
+|---|---|
+| [`Zhanfg/PatchNest-Module`](https://github.com/Zhanfg/PatchNest-Module) | Module installer, WebUI, package and update entry point |
+| [`Zhanfg/KernelPatch-Public`](https://github.com/Zhanfg/KernelPatch-Public) | Source and releases for `kpimg` and `kptools` |
+| [`Zhanfg/PatchNest`](https://github.com/Zhanfg/PatchNest) | Source/release location for the `kpatch` user-space tool |
+| [`Zhanfg/PatchNest-Kpms`](https://github.com/Zhanfg/PatchNest-Kpms) | KPM source and catalog |
 
-KPMs (KernelPatch Modules) are distributed via a standalone **Kpm-Repo**
-project. You don't need to rebuild PatchNest to add or remove KPMs.
+## KPM repository
 
-**Default repo**: [Zhanfg/Kpm-Repo](https://github.com/Zhanfg/Kpm-Repo)
+The default catalog is:
 
-### Use the default repo
+```text
+https://raw.githubusercontent.com/Zhanfg/PatchNest-Kpms/main/kpm_repo.json
+```
 
-Open the PatchNest WebUI → **KPM Repository** → it auto-fetches the
-default manifest on first run.
+The WebUI also accepts additional HTTPS catalog URLs. A system-wide catalog override can be placed at:
 
-### Add a custom/forked repo
+```text
+/data/adb/patchnest/repos.json
+```
 
-1. Fork [Zhanfg/Kpm-Repo](https://github.com/Zhanfg/Kpm-Repo)
-2. Add your KPM sources in `modules/<id>/` (see
-   [Kpm-Repo README](https://github.com/Zhanfg/Kpm-Repo#add-your-own-kpm))
-3. Push to `main` — GitHub Actions will compile, sign, and release
-   the `.kpm` ZIPs automatically
-4. In the PatchNest WebUI → **KPM Repository** → **Add Repository**
-5. Paste your fork's manifest URL:
-   ```
-   https://raw.githubusercontent.com/<your-username>/Kpm-Repo/main/kpm_repo.json
-   ```
+Catalog source, build and release work is maintained in `PatchNest-Kpms`; KPM binaries are not built into the PatchNest Module archive.
 
-Full forking guide: [Kpm-Repo README](https://github.com/Zhanfg/Kpm-Repo)
+## Build integrity
 
-### Ship a custom default repo in your PatchNest fork
+Dependency versions and trusted release digests are pinned in `version.properties`. Both local and CI builds reject missing or mismatched SHA256 values. Release tags use the form `v<internal-version>`, while `module.prop` and `update.json` use the version without the `v` prefix.
 
-If you maintain a PatchNest fork and want to ship a non-default
-default KPM repo (e.g. pointing users at your own Kpm-Repo fork):
-
-1. Fork both [PatchNest-Module](https://github.com/Zhanfg/PatchNest-Module)
-   and [Kpm-Repo](https://github.com/Zhanfg/Kpm-Repo)
-2. In your PatchNest fork, create a file `repos.json` at the module
-   root:
-   ```json
-   [{ "url": "https://raw.githubusercontent.com/<you>/Kpm-Repo/main/kpm_repo.json",
-      "name": "Acme KPMs" }]
-   ```
-3. Rebuild your PatchNest module. The `customize.sh` installer will
-   copy `repos.json` to `/data/adb/patchnest/repos.json` on device; the
-   WebUI reads this file before any localStorage or default URL.
-
----
+The current restart baseline and remaining work are recorded in [`docs/restart/BASELINE.md`](docs/restart/BASELINE.md).
 
 ## Credits
 
-- Patch scripts from [APatch](https://github.com/bmax121/APatch)
-- PatchNest binaries from [Zhanfg/PatchNest](https://github.com/Zhanfg/PatchNest)
-- magiskboot binary from [Magisk](https://github.com/topjohnwu/Magisk)
+- Upstream module: [`KernelSU-Next/KPatch-Next-Module`](https://github.com/KernelSU-Next/KPatch-Next-Module)
+- Patch scripts derived from [`bmax121/APatch`](https://github.com/bmax121/APatch)
+- `magiskboot` from [`topjohnwu/Magisk`](https://github.com/topjohnwu/Magisk)
 
 ## License
 
-- PatchNest-Module is licensed under GNU General Public License v3 [GPL-3.0](/LICENSE)
-- PatchNest binaries is licensed under GNU General Public License v2 [GPL-2.0](https://www.gnu.org/licenses/gpl-2.0.html)
-- magiskboot binary from Magisk is licenced under GNU General Public License v3 [GPL-3.0](https://github.com/topjohnwu/Magisk/blob/master/LICENSE)
-- WebUI is licensed under MIT License [MIT](/webui/LICENSE)
+- PatchNest-Module: [GPL-3.0](LICENSE)
+- PatchNest/KernelPatch components retain their applicable upstream GPL licenses.
+- WebUI: [MIT](webui/LICENSE)
