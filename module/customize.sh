@@ -1,104 +1,98 @@
 #!/system/bin/sh
-MODDIR="/data/adb/modules/PatchNest"
+# PatchNest module installation validation and state migration.
+# The root manager owns placement of $MODPATH; this script never deletes or
+# recopies the active module directory.
 
-# P2-Cluster E fix: defend against an unset/empty $MODDIR which would turn
-# the rm -rf below into a recursive wipe of /. We rely on $MODPATH from
-# the Magisk install harness, falling back to the legacy $MODDIR constant
-# only when $MODPATH is empty.
-[ -z "${MODPATH:-}" ] && MODPATH="$MODDIR"
-# Sanity: refuse to run if MODPATH is empty or does not exist.
-if [ -z "$MODPATH" ] || [ ! -d "$MODPATH" ]; then
-    abort "! MODPATH is empty or missing: '$MODPATH'"
-fi
+STATE_DIR=/data/adb/patchnest
 
-# We only support arm64
-if [ "$ARCH" != "arm64" ]; then
-    abort "! Only arm64 is supported"
-fi
+[ -n "${MODPATH:-}" ] && [ -d "$MODPATH" ] || abort "! MODPATH is empty or missing"
+[ "${ARCH:-}" = "arm64" ] || abort "! Only arm64 is supported"
 
-# Detect root manager
-ROOT_MGR="unknown"
-if [ -n "$APATCH" ]; then
-    ROOT_MGR="apatch"
-elif [ -n "$KSU" ]; then
-    ROOT_MGR="ksu"
-elif [ -n "$MAGISK_VER" ]; then
-    ROOT_MGR="magisk"
+ROOT_MGR=unknown
+if [ -n "${APATCH:-}" ]; then
+    ROOT_MGR=apatch
+elif [ -n "${KSU:-}" ]; then
+    ROOT_MGR=ksu
+elif [ -n "${MAGISK_VER:-}" ]; then
+    ROOT_MGR=magisk
 fi
 
 ui_print "- Root manager: $ROOT_MGR"
 ui_print "- Architecture: $ARCH"
 
+# Validate the package before touching persistent state. Missing WebUI or boot
+# safety files must stop installation rather than produce a partial module.
+for _required_file in \
+    module.prop \
+    bin/kpatch \
+    bin/kptools \
+    bin/kpimg \
+    bin/magiskboot \
+    patch/boot_extract.sh \
+    patch/boot_patch.sh \
+    patch/boot_unpatch.sh \
+    patch/flash_guard.sh \
+    patch/boot_target.sh \
+    patch/util_functions.sh \
+    webroot/index.html \
+    webroot/index.js; do
+    [ -s "$MODPATH/$_required_file" ] || abort "! Required package file missing or empty: $_required_file"
+done
+
+# Apply deterministic permissions to the framework-provided staging directory.
+set_perm_recursive "$MODPATH" 0 0 0755 0644
 set_perm_recursive "$MODPATH/bin" 0 2000 0755 0755
+set_perm_recursive "$MODPATH/patch" 0 0 0755 0755
+for _script in \
+    action.sh customize.sh detect_env.sh install_kpm.sh kpm_verify.sh \
+    post-fs-data.sh service.sh status.sh uninstall.sh compile_kpm.sh; do
+    [ -f "$MODPATH/$_script" ] && set_perm "$MODPATH/$_script" 0 0 0755
+ done
 
-mkdir -p /data/adb/patchnest
+mkdir -p "$STATE_DIR" || abort "! Cannot create $STATE_DIR"
+chmod 0700 "$STATE_DIR" 2>/dev/null || true
 
-# Optional system-managed KPM repos override. If the maintainer ships
-# a file at $MODPATH/repos.json in their PatchNest build, copy it
-# to /data/adb/patchnest/repos.json — the WebUI's Kpm-Repo page will
-# read this and use it as the canonical repo list instead of the
-# built-in default. Format:
-#   [ { "url": "https://...", "name": "..." }, ... ]
-# This is the cleanest way for a PatchNest fork to ship a non-default
-# default repo (e.g. "always use Acme's Kpm-Repo instead of the
-# official one"). See https://github.com/Zhanfg/Kpm-Repo for details.
+# Persist root manager information atomically.
+_root_tmp="$STATE_DIR/root_manager.tmp.$$"
+printf '%s\n' "$ROOT_MGR" >"$_root_tmp" || abort "! Cannot write root manager state"
+mv "$_root_tmp" "$STATE_DIR/root_manager" || abort "! Cannot finalize root manager state"
+chmod 0600 "$STATE_DIR/root_manager" 2>/dev/null || true
+
+# Optional system-managed repository policy. Validate the top-level JSON type
+# when a parser is available, then install atomically. Existing user policy is
+# not overwritten when the package does not provide repos.json.
 if [ -f "$MODPATH/repos.json" ]; then
-    cp "$MODPATH/repos.json" /data/adb/patchnest/repos.json
+    if command -v jq >/dev/null 2>&1; then
+        jq -e 'type == "array"' "$MODPATH/repos.json" >/dev/null 2>&1 \
+            || abort "! repos.json must contain a JSON array"
+    fi
+    _repos_tmp="$STATE_DIR/repos.json.tmp.$$"
+    cp "$MODPATH/repos.json" "$_repos_tmp" || abort "! Cannot stage repos.json"
+    chmod 0600 "$_repos_tmp" 2>/dev/null || true
+    mv "$_repos_tmp" "$STATE_DIR/repos.json" || abort "! Cannot install repos.json"
     ui_print "- Installed system repos.json"
 fi
 
-# Migrate package_config from APatch if present
-if [ -f "/data/adb/ap/package_config" ] && [ ! -f "/data/adb/patchnest/package_config" ]; then
-    cp "/data/adb/ap/package_config" /data/adb/patchnest/package_config
+# Migrate APatch package policy only when PatchNest has no policy yet. Copy to
+# a temporary file first so interruption cannot leave a truncated policy.
+if [ -f /data/adb/ap/package_config ] && [ ! -f "$STATE_DIR/package_config" ]; then
+    _policy_tmp="$STATE_DIR/package_config.tmp.$$"
+    cp /data/adb/ap/package_config "$_policy_tmp" || abort "! Cannot migrate APatch package_config"
+    [ -s "$_policy_tmp" ] || { rm -f "$_policy_tmp"; abort "! Migrated package_config is empty"; }
+    chmod 0600 "$_policy_tmp" 2>/dev/null || true
+    mv "$_policy_tmp" "$STATE_DIR/package_config" || abort "! Cannot finalize package_config"
     ui_print "- Migrated APatch package_config"
 fi
 
-# Copy binaries (single source: KernelPatch-Public)
-ui_print "- Installing KernelPatch binaries..."
-
-# P1-Cluster D fix: missing critical binaries should abort the install,
-# not silently produce a broken module.
-if [ ! -x "$MODPATH/bin/kpatch" ]; then
-    abort "! kpatch binary missing or not executable in $MODPATH/bin"
-fi
-if [ ! -x "$MODPATH/bin/kptools" ]; then
-    abort "! kptools binary missing or not executable in $MODPATH/bin"
-fi
-
-# Save root manager info
-echo "$ROOT_MGR" > /data/adb/patchnest/root_manager
-
-# backup module.prop
-cp "$MODPATH/module.prop" "$MODPATH/module.prop.bak"
-
-# Hot update webui, patch scripts and binaries
-# P2-Cluster E fix: defensive globs — if the directory is empty the
-# pattern literally matches, so we guard with set +f / null-glob
-# behaviour via noclobber on the rm side. We use a leading-/-style
-# protection by checking each path explicitly.
-rm -rf "$MODDIR/webroot"/* 2>/dev/null || true
-rm -rf "$MODDIR/bin"/*     2>/dev/null || true
-rm -rf "$MODDIR/patch"/*   2>/dev/null || true
-[ -d "$MODDIR/webroot" ] || mkdir -p "$MODDIR/webroot"
-[ -d "$MODDIR/bin" ]     || mkdir -p "$MODDIR/bin"
-[ -d "$MODDIR/patch" ]   || mkdir -p "$MODDIR/patch"
-cp -rf "$MODPATH/webroot"/* "$MODDIR/webroot/" 2>/dev/null || true
-cp -rf "$MODPATH/bin"/*     "$MODDIR/bin/"     2>/dev/null || true
-cp -rf "$MODPATH/patch"/*   "$MODDIR/patch/"   2>/dev/null || true
-
-# Copy environment detection script
-cp -f "$MODPATH/detect_env.sh" "$MODDIR/detect_env.sh" 2>/dev/null || true
-
-ui_print "- Installation complete"
+ui_print "- Package validation and state migration complete"
 ui_print ""
 ui_print "  Next steps:"
 ui_print "  1. Reboot your device"
 if [ "$ROOT_MGR" = "magisk" ]; then
     ui_print "  2. Install KSUWebUIStandalone app"
-    ui_print "     (no native WebUI support in Magisk)"
-    ui_print "  3. Open WebUI via Manager → Action button"
+    ui_print "  3. Open PatchNest from the module Action button"
 else
-    ui_print "  2. Open WebUI via Manager → PatchNest → Action"
+    ui_print "  2. Open PatchNest from the manager WebUI"
 fi
-ui_print "  4. Click 'Start' to patch kernel"
-ui_print "  5. Reboot again to activate"
+ui_print "  4. Review the detected boot target before patching"
+ui_print "  5. Reboot only after patch and readback verification succeeds"
