@@ -39,11 +39,14 @@ magisk_apk_v30.7=e0d32d2123532860f97123d927b1bb86c4e08e6fd8a48bfc6b5bee0afae9ebd
 """
 
 GOOD_BUILD = """#!/usr/bin/env bash
-download_assets "Zhanfg/KernelPatch-Public"
-download_assets "Zhanfg/PatchNest"
-download_assets "topjohnwu/Magisk"
-printf x | sha256sum -c -
+download_release_asset Zhanfg/KernelPatch-Public
+download_release_asset Zhanfg/PatchNest
+download_release_asset topjohnwu/Magisk
+printf x | sha256sum -c - >&2
 pnpm install --frozen-lockfile
+SOURCE_DATE_EPOCH=1
+zip -X -q archive.zip
+cat > build-provenance.json
 """
 
 
@@ -126,6 +129,14 @@ class ReleaseMetadataTests(unittest.TestCase):
             write_fixture(root, update=payload)
             errors = VERIFY.verify(root)
             self.assertTrue(any("zipUrl path" in error for error in errors))
+
+    def test_stdout_progress_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            build = GOOD_BUILD + 'echo "Downloading $asset_name"\n'
+            write_fixture(root, build=build)
+            errors = VERIFY.verify(root)
+            self.assertTrue(any("command-substitution" in error for error in errors))
 
 
 if __name__ == "__main__":
