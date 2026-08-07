@@ -23,6 +23,7 @@ FLASH_TO_DEVICE=${3:-false}
 
 . "$MODPATH/util_functions.sh"
 . "$MODPATH/flash_guard.sh"
+. "$MODPATH/recovery_state.sh"
 
 fail() {
   echo "! $*" >&2
@@ -125,7 +126,10 @@ flash_image "$_backup_real" "$BOOTIMAGE"
 _rc=$?
 [ "$_rc" -eq 0 ] || fail "Restore flash/readback verification failed ($_rc)"
 
-printf '%s\n' 0 >"$PNDIR/boot_count" 2>/dev/null || true
-rm -f "$PNDIR/autorecovery_active" "$PNDIR/auto_unpatch_requested" 2>/dev/null || true
+if patchnest_suspend_recovery_monitoring verified-backup-restored "$_target_name" "$_actual_sha"; then
+  echo "- Recovery monitoring suspended until PatchNest is installed again"
+else
+  echo "! Backup was restored, but recovery monitoring state could not be suspended" >&2
+fi
 echo "- Verified backup restored and read back successfully"
 exit 0
