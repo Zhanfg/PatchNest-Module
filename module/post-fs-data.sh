@@ -25,6 +25,8 @@ KPM_ADMISSION_LOG="$PNDIR/kpm_admission.log"
 THRESHOLD=3
 POLICY_READY=true
 
+. "$MODDIR/patch/recovery_state.sh"
+
 mkdir -p "$SERVICE_D" "$PNDIR" "$KPM_DIR" "$KPM_EVENT_DIR" "$KPM_QUARANTINE_DIR" "$KPM_FAILED_DIR"
 chmod 0700 "$PNDIR" "$KPM_DIR" "$KPM_EVENT_DIR" "$KPM_QUARANTINE_DIR" "$KPM_FAILED_DIR" 2>/dev/null || true
 if cp "$MODDIR/status.sh" "$STATUS_SH"; then
@@ -189,6 +191,21 @@ for _kpm in "$KPM_DIR"/*.kpm; do
   fi
 done
 
+# A successful current-image unpatch or verified-backup restore leaves the
+# module installed while the kernel is intentionally no longer PatchNest-
+# patched. Keep admission housekeeping active, but do not treat those boots as
+# failed patch boots. A healthy kpatch handshake later clears this suspension.
+if [ -e "$PATCHNEST_SUSPEND_FILE" ]; then
+  if patchnest_recovery_monitoring_suspended; then
+    printf '%s\n' 0 >"$BOOT_COUNT_FILE" 2>/dev/null || true
+    rm -f "$RECOVERY_MARKER" "$RECOVERY_REQUEST" 2>/dev/null || true
+    admission_log "recovery monitoring remains suspended after intentional unpatch/restore"
+    exit 0
+  fi
+  admission_log "invalid recovery suspension state removed; normal monitoring resumed"
+  rm -f "$PATCHNEST_SUSPEND_FILE" 2>/dev/null || true
+fi
+
 current_count=0
 if [ -f "$BOOT_COUNT_FILE" ]; then
   current_count=$(printf '%s' "$(cat "$BOOT_COUNT_FILE" 2>/dev/null || true)" | tr -cd '0-9' | head -c 6)
@@ -217,6 +234,7 @@ cat >"$state_tmp" <<EOF
   "recovery_requested": $requested,
   "requested_at": "$requested_at",
   "automatic_flash_performed": false,
+  "monitoring_suspended": false,
   "required_next_step": "select_target_bound_verified_backup"
 }
 EOF
