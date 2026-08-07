@@ -9,11 +9,12 @@
  * be selected or restored.
  */
 import { exec, toast } from 'kernelsu-alt';
-import { modDir, escapeShell } from '../constants.js';
+import { modDir, persistDir, escapeShell } from '../constants.js';
 import { getString } from '../language.js';
 import { buildCurrentUnpatchModel } from './boot-unpatch-model.js';
 
 const UNPATCH_SH = `${modDir}/patch/boot_unpatch.sh`;
+const APPROVAL_FILE = `${persistDir}/unpatch_approval`;
 
 function appendBullet(parent, text) {
     const row = document.createElement('div');
@@ -44,14 +45,48 @@ function renderOperationPlan(model) {
     return true;
 }
 
+async function clearUnpatchApproval() {
+    try {
+        await exec(`rm -f ${escapeShell(APPROVAL_FILE)}`, {
+            env: { PATH: '/system/bin' },
+        });
+    } catch (_) {
+        // A missing stale marker is harmless. Creation below remains fail-closed.
+    }
+}
+
+async function createUnpatchApproval() {
+    const approvalDir = persistDir;
+    const tmpPath = `${APPROVAL_FILE}.tmp`;
+    const command = [
+        'set -eu',
+        'umask 077',
+        `mkdir -p ${escapeShell(approvalDir)}`,
+        `rm -f ${escapeShell(tmpPath)}`,
+        `{ printf '%s\\n' 'operation=current-image-unpatch'; printf 'approved_at='; date +%s; } > ${escapeShell(tmpPath)}`,
+        `chmod 0600 ${escapeShell(tmpPath)}`,
+        `mv ${escapeShell(tmpPath)} ${escapeShell(APPROVAL_FILE)}`,
+    ].join('; ');
+
+    try {
+        const result = await exec(command, { env: { PATH: '/system/bin' } });
+        return result.errno === 0;
+    } catch (_) {
+        return false;
+    }
+}
+
 /**
  * Ask the user to confirm the current-image unpatch operation.
  *
  * This function is deliberately fail-closed. If the dialog or any required
  * element is missing, it returns false instead of silently allowing a boot
- * write without an explicit confirmation.
+ * write without an explicit confirmation. A successful confirmation creates
+ * a one-time, short-lived approval consumed by boot_unpatch.sh.
  */
 export async function confirmAutoUnpatch() {
+    await clearUnpatchApproval();
+
     const dialog = document.getElementById('auto-unpatch-dialog');
     const summary = document.getElementById('auto-unpatch-summary');
     const warning = document.getElementById('auto-unpatch-warning');
@@ -95,13 +130,23 @@ export async function confirmAutoUnpatch() {
             resolve(value);
         };
 
-        newConfirm.onclick = () => {
-            dialog.close();
+        newConfirm.onclick = async () => {
+            newConfirm.disabled = true;
+            const approved = await createUnpatchApproval();
+            if (!approved) {
+                newConfirm.disabled = false;
+                toast(getString('msg_error', 'Could not create the one-time unpatch approval'));
+                finish(false);
+                dialog.close();
+                return;
+            }
             finish(true);
-        };
-        newCancel.onclick = () => {
             dialog.close();
+        };
+        newCancel.onclick = async () => {
+            await clearUnpatchApproval();
             finish(false);
+            dialog.close();
         };
         dialog.addEventListener('close', () => finish(false), { once: true });
         dialog.show();
