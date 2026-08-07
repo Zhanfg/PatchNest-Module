@@ -11,7 +11,7 @@ KPM_DIR="$PNDIR/kpm"
 KPM_ZIP_DIR="$PNDIR/kpm_zips"
 KPM_EVENT_DIR="$PNDIR/kpm_events"
 LOG="$PNDIR/service.log"
-PATH="$MODDIR/bin:$PATH"
+PATH="$MODDIR/bin:${PATH:-}"
 ZIP_FILE=${1:-}
 TMPDIR=""
 STAGE_DIR=""
@@ -137,29 +137,19 @@ KO_COUNT=$(find "$TMPDIR/root" -type f \( -name '*.ko' -o -name '*.o' \) | wc -l
 KPM_COUNT=$(find "$TMPDIR/root" -type f -name '*.kpm' | wc -l | tr -d ' ')
 SRC_COUNT=$(find "$TMPDIR/root" -type f -name '*.c' | wc -l | tr -d ' ')
 [ "$KO_COUNT" = "0" ] || fail "Linux .ko/.o files are not KernelPatch KPM artifacts"
-[ "$KPM_COUNT" -le 1 ] || fail "ZIP contains multiple KPM binaries"
-if [ "$KPM_COUNT" -gt 0 ] && [ "$SRC_COUNT" -gt 0 ]; then
-    fail "ZIP must contain either one binary KPM or source, not both"
-fi
+[ "$SRC_COUNT" = "0" ] || fail "On-device KPM source compilation is disabled; provide one prebuilt .kpm"
+[ "$KPM_COUNT" = "1" ] || fail "ZIP must contain exactly one prebuilt KPM binary"
 
 BUILT_KPM="$TMPDIR/result.kpm"
 SIGNATURE_FILE=""
 SIGNATURE_VALID=false
-if [ "$KPM_COUNT" = "1" ]; then
-    KPM_FILE=$(find "$TMPDIR/root" -type f -name '*.kpm' | head -n 1)
-    validate_kpm_binary "$KPM_FILE" || fail "KPM binary failed kptools validation"
-    cp "$KPM_FILE" "$BUILT_KPM" || fail "Cannot stage KPM binary"
-    if [ -f "${KPM_FILE}.sig" ]; then
-        SIGNATURE_FILE="${KPM_FILE}.sig"
-    elif [ -f "${KPM_FILE%.kpm}.sig" ]; then
-        SIGNATURE_FILE="${KPM_FILE%.kpm}.sig"
-    fi
-elif [ "$SRC_COUNT" -gt 0 ]; then
-    [ -x "$MODDIR/compile_kpm.sh" ] || fail "Source KPM compiler is unavailable"
-    "$MODDIR/compile_kpm.sh" "$TMPDIR/root" "$BUILT_KPM" "$MODDIR" || fail "Source KPM compilation failed"
-    validate_kpm_binary "$BUILT_KPM" || fail "Compiled KPM failed kptools validation"
-else
-    fail "ZIP contains no .kpm or KPM source"
+KPM_FILE=$(find "$TMPDIR/root" -type f -name '*.kpm' | head -n 1)
+validate_kpm_binary "$KPM_FILE" || fail "KPM binary failed kptools validation"
+cp "$KPM_FILE" "$BUILT_KPM" || fail "Cannot stage KPM binary"
+if [ -f "${KPM_FILE}.sig" ]; then
+    SIGNATURE_FILE="${KPM_FILE}.sig"
+elif [ -f "${KPM_FILE%.kpm}.sig" ]; then
+    SIGNATURE_FILE="${KPM_FILE%.kpm}.sig"
 fi
 
 if [ -n "$SIGNATURE_FILE" ]; then
@@ -174,14 +164,19 @@ if [ "$SIGNATURE_VALID" != "true" ]; then
     log "Unsigned KPM prepared with autoload disabled: $MOD_ID"
 fi
 
+ZIP_NAME="${MOD_ID}.zip"
+ZIP_DIGEST_NAME="${MOD_ID}.zip.sha256"
 stage_file "$BUILT_KPM" module.kpm 0600 || fail "Cannot stage KPM binary"
-stage_file "$ZIP_FILE" source.zip 0600 || fail "Cannot stage source ZIP"
+stage_file "$ZIP_FILE" "$ZIP_NAME" 0600 || fail "Cannot stage source ZIP"
 stage_file "$PROP_FILE" module.prop 0600 || fail "Cannot stage module metadata"
 if [ "$SIGNATURE_VALID" = "true" ]; then
     stage_file "$SIGNATURE_FILE" module.kpm.sig 0600 || fail "Cannot stage KPM signature"
 fi
-sha256sum "$STAGE_DIR/source.zip" >"$STAGE_DIR/source.zip.sha256" 2>/dev/null || fail "Cannot hash staged ZIP"
-chmod 0600 "$STAGE_DIR/source.zip.sha256" 2>/dev/null || true
+(
+    cd "$STAGE_DIR" || exit 1
+    sha256sum "$ZIP_NAME" >"$ZIP_DIGEST_NAME"
+) || fail "Cannot hash staged ZIP"
+chmod 0600 "$STAGE_DIR/$ZIP_DIGEST_NAME" 2>/dev/null || true
 if [ -n "$MOD_EVENT" ]; then printf '%s\n' "$MOD_EVENT" >"$STAGE_DIR/events"; chmod 0600 "$STAGE_DIR/events" 2>/dev/null || true; fi
 if [ -n "$MOD_ARGS" ]; then printf '%s\n' "$MOD_ARGS" >"$STAGE_DIR/args"; chmod 0600 "$STAGE_DIR/args" 2>/dev/null || true; fi
 
@@ -193,8 +188,12 @@ rm -f "$KPM_EVENT_DIR/${MOD_ID}.autoload"
 
 # Commit metadata first and binary last. All sources were fully prepared under
 # the same /data filesystem, so these renames do not depend on network or ZIP IO.
-mv "$STAGE_DIR/source.zip" "$KPM_ZIP_DIR/${MOD_ID}.zip" || fail "Cannot install source ZIP"
-mv "$STAGE_DIR/source.zip.sha256" "$KPM_ZIP_DIR/${MOD_ID}.zip.sha256" || fail "Cannot install ZIP digest"
+mv "$STAGE_DIR/$ZIP_NAME" "$KPM_ZIP_DIR/$ZIP_NAME" || fail "Cannot install source ZIP"
+mv "$STAGE_DIR/$ZIP_DIGEST_NAME" "$KPM_ZIP_DIR/$ZIP_DIGEST_NAME" || fail "Cannot install ZIP digest"
+(
+    cd "$KPM_ZIP_DIR" || exit 1
+    sha256sum -c "$ZIP_DIGEST_NAME" >/dev/null 2>&1
+) || fail "Installed ZIP does not match its retained digest"
 mv "$STAGE_DIR/module.prop" "$KPM_ZIP_DIR/${MOD_ID}.prop" || fail "Cannot install metadata"
 if [ -f "$STAGE_DIR/events" ]; then mv "$STAGE_DIR/events" "$KPM_EVENT_DIR/${MOD_ID}.events" || fail "Cannot install event config"; else rm -f "$KPM_EVENT_DIR/${MOD_ID}.events"; fi
 if [ -f "$STAGE_DIR/args" ]; then mv "$STAGE_DIR/args" "$KPM_EVENT_DIR/${MOD_ID}.args" || fail "Cannot install argument config"; else rm -f "$KPM_EVENT_DIR/${MOD_ID}.args"; fi
