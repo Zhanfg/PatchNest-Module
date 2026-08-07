@@ -3,13 +3,18 @@
 # PatchNest Boot Image Unpatcher
 #
 # Usage: boot_unpatch.sh <bootimage> [flash_to_device:true|false]
-# The default remains `true` for existing WebUI callers. `false` generates and
-# verifies an unpatched image without writing a block device.
+#
+# `false` generates and verifies an unpatched image without writing a block
+# device. A direct block-device write requires either the short-lived one-time
+# WebUI approval file or the explicit CLI environment override
+# PATCHNEST_UNPATCH_APPROVED=1.
 #######################################################################################
 
 MODPATH=${0%/*}
 PNDIR="/data/adb/patchnest"
 BACKUP_DIR="$PNDIR/backup"
+APPROVAL_FILE="$PNDIR/unpatch_approval"
+APPROVAL_MAX_AGE=120
 BOOTIMAGE=${1:-}
 FLASH_TO_DEVICE=${2:-true}
 
@@ -44,6 +49,81 @@ validate_boot_image() {
   return 0
 }
 
+require_flash_approval() {
+  if [ "${PATCHNEST_UNPATCH_APPROVED:-0}" = "1" ]; then
+    echo "- Explicit CLI unpatch approval accepted"
+    return 0
+  fi
+
+  [ -f "$APPROVAL_FILE" ] && [ ! -L "$APPROVAL_FILE" ] || {
+    echo "! Missing one-time unpatch approval; operation was not confirmed" >&2
+    return 1
+  }
+
+  _owner=$(stat -c '%u' "$APPROVAL_FILE" 2>/dev/null || true)
+  [ "$_owner" = "0" ] || {
+    echo "! Unpatch approval is not owned by root" >&2
+    rm -f "$APPROVAL_FILE" 2>/dev/null || true
+    return 1
+  }
+
+  _size=$(wc -c <"$APPROVAL_FILE" 2>/dev/null || true)
+  case "$_size" in
+    ''|*[!0-9]*) _size=999999 ;;
+  esac
+  [ "$_size" -le 256 ] || {
+    echo "! Unpatch approval file is malformed" >&2
+    rm -f "$APPROVAL_FILE" 2>/dev/null || true
+    return 1
+  }
+
+  [ "$(grep -c '^operation=' "$APPROVAL_FILE" 2>/dev/null)" = "1" ] \
+    && grep -qx 'operation=current-image-unpatch' "$APPROVAL_FILE" 2>/dev/null \
+    || {
+      echo "! Unpatch approval operation does not match" >&2
+      rm -f "$APPROVAL_FILE" 2>/dev/null || true
+      return 1
+    }
+
+  [ "$(grep -c '^approved_at=' "$APPROVAL_FILE" 2>/dev/null)" = "1" ] || {
+    echo "! Unpatch approval timestamp is missing or duplicated" >&2
+    rm -f "$APPROVAL_FILE" 2>/dev/null || true
+    return 1
+  }
+  _approved_at=$(sed -n 's/^approved_at=//p' "$APPROVAL_FILE" 2>/dev/null | head -n 1)
+  case "$_approved_at" in
+    ''|*[!0-9]*)
+      echo "! Unpatch approval timestamp is invalid" >&2
+      rm -f "$APPROVAL_FILE" 2>/dev/null || true
+      return 1
+      ;;
+  esac
+
+  _now=$(date +%s 2>/dev/null || true)
+  case "$_now" in
+    ''|*[!0-9]*)
+      echo "! Current time is unavailable; cannot validate approval" >&2
+      rm -f "$APPROVAL_FILE" 2>/dev/null || true
+      return 1
+      ;;
+  esac
+  _age=$((_now - _approved_at))
+  if [ "$_age" -lt 0 ] || [ "$_age" -gt "$APPROVAL_MAX_AGE" ]; then
+    echo "! Unpatch approval expired or has a future timestamp" >&2
+    rm -f "$APPROVAL_FILE" 2>/dev/null || true
+    return 1
+  fi
+
+  # Consume before unpacking so the same user confirmation cannot authorize a
+  # retry or a second target. A new write always requires a new confirmation.
+  rm -f "$APPROVAL_FILE" || {
+    echo "! Could not consume one-time unpatch approval" >&2
+    return 1
+  }
+  echo "- One-time current-image unpatch approval accepted"
+  return 0
+}
+
 select_verified_backup() {
   _target=$1
   _target_name=$(partition_name_for_target "$_target")
@@ -72,8 +152,9 @@ select_verified_backup() {
   return 1
 }
 
-# Callable recovery primitive. It never selects a legacy, manifest-less,
-# target-mismatched, digest-mismatched, or unpack-invalid image.
+# Separate recovery primitive. This is not the normal WebUI unpatch path: it
+# restores a target-bound verified backup and must be wired through its own
+# explicit recovery UX before use.
 auto_unpatch() {
   [ -n "$BOOTIMAGE" ] && [ -e "$BOOTIMAGE" ] || {
     echo "! auto_unpatch: BOOTIMAGE not set or missing ($BOOTIMAGE)" >&2
@@ -109,6 +190,7 @@ case "$FLASH_TO_DEVICE" in
 esac
 if [ "$FLASH_TO_DEVICE" = "true" ]; then
   assert_kernel_boot_target "$BOOTIMAGE" || exit 1
+  require_flash_approval || exit 1
 fi
 
 command -v magiskboot >/dev/null 2>&1 || { echo "! Command magiskboot not found" >&2; exit 1; }
