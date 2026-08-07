@@ -35,12 +35,15 @@ def main() -> int:
     status = read("module/status.sh")
     installer = read("module/install_kpm.sh")
     verifier = read("module/kpm_verify.sh")
+    quarantine = read("module/manage_kpm_quarantine.sh")
     service = read("module/service.sh")
 
     reject(customize, 'rm -rf "$MODDIR/webroot"', "destructive self-copy hot update returned")
     reject(customize, 'cp -rf "$MODPATH/webroot"', "installer still recopies its active module directory")
     require(customize, "patch/flash_guard.sh", "package validation omits the flash guard")
     require(customize, "patch/boot_target.sh", "package validation omits boot-only discovery")
+    require(customize, "patch/kptools_argv.sh", "package validation omits the argv compatibility helper")
+    require(customize, "manage_kpm_quarantine.sh", "package validation omits the quarantine manager")
     require(customize, "module.prop.bak", "validated module metadata backup is not created")
     require(customize, "KPM_SIGNATURE_POLICY=strict", "new installations do not default to strict KPM signatures")
     require(customize, 'if [ ! -e "$STATE_DIR/config" ]', "installer may overwrite existing KPM signature policy")
@@ -54,6 +57,12 @@ def main() -> int:
     require(post_fs, '"$KPM_EVENT_DIR/${_name}.autoload"', "autoload marker is not enforced before service")
     require(post_fs, '"$KPM_DIR"/*.ko "$KPM_DIR"/*.o', "Linux objects are not rejected before KPM loading")
     require(post_fs, "move_with_sidecars", "KPM quarantine loses associated metadata/signatures")
+    require(post_fs, "state=staging", "quarantine transaction has no incomplete state")
+    require(post_fs, "state=complete", "quarantine transaction is never finalized")
+    require(post_fs, "manifest.properties", "quarantine transaction lacks a machine-readable manifest")
+    require(post_fs, "module.kpm.sig", "signature sidecar is not stored with its transaction")
+    require(post_fs, "autoload-disabled", "non-autoload quarantine reason is not recorded")
+    require(post_fs, "signature-policy-unavailable", "policy-failure quarantine reason is not recorded")
 
     require(status, "awk -v key=", "status still relies on a delimiter-sensitive sed replacement")
     reject(status, 'sed "s|^$prop=', "pipe-delimited sed status update returned")
@@ -76,6 +85,24 @@ def main() -> int:
     require(installer, "Another KPM installation is already running", "concurrent KPM installation lock is missing")
     require(installer, ".kpm-stage.$$", "installation files are not prepared in a staging directory")
     require(installer, 'mv "$STAGE_DIR/module.kpm" "$DEST_KPM"', "KPM binary is not committed after staged metadata")
+
+    # Quarantine management is intentionally recovery-oriented: list/inspect
+    # are read-only; activation accepts only a signed KPM transaction and never
+    # overwrites a live module. There is no delete/force path.
+    require(quarantine, "list_entries", "quarantine manager has no read-only listing")
+    require(quarantine, "inspect_entry", "quarantine manager has no read-only inspection")
+    require(quarantine, "activate_entry", "quarantine manager has no verified activation path")
+    require(quarantine, "Only quarantined .kpm transactions can be activated", "non-KPM transactions can be activated")
+    require(quarantine, "Quarantined KPM failed kptools validation", "activation skips KPM parsing")
+    require(quarantine, "Quarantined KPM signature is invalid", "activation skips signature validation")
+    require(quarantine, "Live KPM already exists", "activation can overwrite an existing module")
+    require(quarantine, "Activation commit failed and was rolled back", "activation has no rollback path")
+    require(quarantine, ".quarantine-manager.lock", "concurrent quarantine activation is not serialized")
+    require(quarantine, "Reboot to load it through the normal admission path", "activation bypasses the normal boot admission path")
+    reject(quarantine, "eval ", "quarantine manager evaluates untrusted manifest content")
+    reject(quarantine, "--force", "quarantine manager exposes a force-overwrite path")
+    if re.search(r"(?m)^\s*delete\)", quarantine):
+        raise AssertionError("quarantine manager exposes a destructive delete command")
 
     # Ed25519 verification must wrap the raw key as RFC 8410 SubjectPublicKeyInfo
     # and use the raw-message pkeyutl interface. A raw key passed to `dgst`
