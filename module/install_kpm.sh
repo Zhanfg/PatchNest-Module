@@ -16,6 +16,8 @@ ZIP_FILE=${1:-}
 TMPDIR=""
 STAGE_DIR=""
 LOCK_DIR="$PNDIR/.kpm-install.lock"
+MAX_ZIP_BYTES=$((64 * 1024 * 1024))
+MAX_EXTRACTED_BYTES=$((32 * 1024 * 1024))
 
 log() {
     mkdir -p "$PNDIR" 2>/dev/null || true
@@ -35,18 +37,34 @@ cleanup() {
 }
 trap cleanup 0 1 2 15
 
-get_prop() {
+get_unique_prop() {
     _file=$1
     _key=$2
-    grep -F "${_key}=" "$_file" 2>/dev/null | head -n 1 | cut -d= -f2-
+    _count=$(grep -c "^${_key}=" "$_file" 2>/dev/null || true)
+    case "$_count" in
+        0) return 1 ;;
+        1) sed -n "s/^${_key}=//p" "$_file" | head -n 1; return 0 ;;
+        *) return 2 ;;
+    esac
+}
+
+read_optional_prop() {
+    _file=$1
+    _key=$2
+    _value=$(get_unique_prop "$_file" "$_key")
+    _rc=$?
+    case "$_rc" in
+        0) printf '%s' "$_value" ;;
+        1) printf '' ;;
+        2) fail "module.prop contains duplicate key: $_key" ;;
+        *) fail "Cannot read module.prop key: $_key" ;;
+    esac
 }
 
 validate_module_id() {
     _id=$1
     [ -n "$_id" ] && [ "${#_id}" -le 64 ] || return 1
-    case "$_id" in
-        .|..|*[!A-Za-z0-9_.-]*) return 1 ;;
-    esac
+    case "$_id" in .|..|*[!A-Za-z0-9_.-]*) return 1 ;; esac
 }
 
 validate_kpm_binary() {
@@ -63,11 +81,12 @@ validate_zip_source() {
         "$MODDIR"/tmp/*|/data/local/tmp/*|/data/adb/patchnest/*|/storage/emulated/0/Download/*|/sdcard/Download/*)
             ZIP_FILE=$_resolved
             ;;
-        *)
-            fail "ZIP must be in PatchNest WebUI temp, /data/local/tmp, PatchNest state, or Download"
-            ;;
+        *) fail "ZIP must be in PatchNest WebUI temp, /data/local/tmp, PatchNest state, or Download" ;;
     esac
     [ -s "$ZIP_FILE" ] || fail "ZIP is empty"
+    _zip_size=$(wc -c <"$ZIP_FILE" 2>/dev/null || true)
+    case "$_zip_size" in ''|*[!0-9]*) fail "Cannot measure ZIP size" ;; esac
+    [ "$_zip_size" -le "$MAX_ZIP_BYTES" ] || fail "ZIP exceeds 64 MiB"
 }
 
 preflight_zip_entries() {
@@ -75,6 +94,10 @@ preflight_zip_entries() {
     _list="$TMPDIR/entries.txt"
     unzip -Z1 "$ZIP_FILE" >"$_list" 2>/dev/null || fail "Cannot list ZIP entries"
     [ -s "$_list" ] || fail "ZIP has no entries"
+
+    _duplicate=$(LC_ALL=C sort "$_list" | uniq -d | head -n 1)
+    [ -z "$_duplicate" ] || fail "ZIP contains duplicate entry: $_duplicate"
+
     _count=0
     while IFS= read -r _entry; do
         _count=$((_count + 1))
@@ -86,6 +109,15 @@ preflight_zip_entries() {
         [ "$_clean" = "$_entry" ] || fail "ZIP entry contains control characters"
         [ "${#_entry}" -le 240 ] || fail "ZIP entry name is too long"
     done <"$_list"
+
+    # Refuse declared extraction totals above the limit before writing entries.
+    # `unzip -l` rows begin with the uncompressed byte count; headers do not.
+    _declared_total=$(unzip -l "$ZIP_FILE" 2>/dev/null | awk '
+        $1 ~ /^[0-9]+$/ && NF >= 4 { total += $1 }
+        END { printf "%.0f", total }
+    ')
+    case "$_declared_total" in ''|*[!0-9]*) fail "Cannot measure declared ZIP extraction size" ;; esac
+    [ "$_declared_total" -le "$MAX_EXTRACTED_BYTES" ] || fail "Declared ZIP extraction exceeds 32 MiB"
 }
 
 stage_file() {
@@ -111,18 +143,26 @@ if find "$TMPDIR/root" -type l -print -quit 2>/dev/null | grep -q .; then
     fail "ZIP contains symbolic links"
 fi
 _extracted_kib=$(du -sk "$TMPDIR/root" 2>/dev/null | awk '{print $1}')
-[ -n "$_extracted_kib" ] && [ "$_extracted_kib" -le 32768 ] || fail "Extracted ZIP exceeds 32 MiB or cannot be measured"
+[ -n "$_extracted_kib" ] && [ "$((_extracted_kib * 1024))" -le "$MAX_EXTRACTED_BYTES" ] \
+    || fail "Extracted ZIP exceeds 32 MiB or cannot be measured"
 
 PROP_FILE="$TMPDIR/root/module.prop"
 [ -s "$PROP_FILE" ] || fail "module.prop must exist at ZIP root"
 [ "$(wc -c <"$PROP_FILE")" -le 65536 ] || fail "module.prop exceeds 64 KiB"
 
-MOD_ID=$(get_prop "$PROP_FILE" id)
-MOD_NAME=$(get_prop "$PROP_FILE" name)
-MOD_VERSION=$(get_prop "$PROP_FILE" version)
-MOD_EVENT=$(get_prop "$PROP_FILE" event)
-MOD_ARGS=$(get_prop "$PROP_FILE" args)
-MOD_AUTOLOAD=$(get_prop "$PROP_FILE" autoLoad)
+MOD_ID=$(get_unique_prop "$PROP_FILE" id)
+_id_rc=$?
+case "$_id_rc" in
+    0) ;;
+    1) fail "module.prop is missing required key: id" ;;
+    2) fail "module.prop contains duplicate key: id" ;;
+    *) fail "Cannot read module.prop id" ;;
+esac
+MOD_NAME=$(read_optional_prop "$PROP_FILE" name)
+MOD_VERSION=$(read_optional_prop "$PROP_FILE" version)
+MOD_EVENT=$(read_optional_prop "$PROP_FILE" event)
+MOD_ARGS=$(read_optional_prop "$PROP_FILE" args)
+MOD_AUTOLOAD=$(read_optional_prop "$PROP_FILE" autoLoad)
 validate_module_id "$MOD_ID" || fail "Unsafe or missing module id"
 [ -n "$MOD_NAME" ] || MOD_NAME=$MOD_ID
 [ -n "$MOD_VERSION" ] || MOD_VERSION=0.0.0
