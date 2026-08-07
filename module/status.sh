@@ -1,11 +1,10 @@
 #!/system/bin/sh
 
-MODDIR="/data/adb/modules/PatchNest"
-PNDIR="/data/adb/patchnest"
-PATH="$MODDIR/bin:$PATH"
+MODDIR=/data/adb/modules/PatchNest
+PNDIR=/data/adb/patchnest
+PATH="$MODDIR/bin:${PATH:-}"
 PROP_FILE="$MODDIR/module.prop"
 PROP_BAK="$PROP_FILE.bak"
-RECOVERY_STATE="$PNDIR/recovery_state.json"
 
 set_prop() {
     _prop=$1
@@ -35,24 +34,10 @@ restore_prop_if_needed() {
 }
 
 mark_boot_healthy() {
-    mkdir -p "$PNDIR" 2>/dev/null || return 1
-    printf '0\n' >"$PNDIR/boot_count" 2>/dev/null || true
-    rm -f "$PNDIR/autorecovery_active" "$PNDIR/auto_unpatch_requested"
-
-    _resolved_at=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)
-    _state_tmp="${RECOVERY_STATE}.tmp.$$"
-    cat >"$_state_tmp" <<EOF
-{
-  "schema_version": 1,
-  "boot_count": 0,
-  "threshold": 3,
-  "recovery_requested": false,
-  "resolved_at": "$_resolved_at",
-  "automatic_flash_performed": false,
-  "resolution": "healthy_kpatch_hello"
-}
-EOF
-    mv "$_state_tmp" "$RECOVERY_STATE" 2>/dev/null || rm -f "$_state_tmp"
+    [ -f "$MODDIR/patch/recovery_state.sh" ] || return 1
+    # shellcheck disable=SC1091
+    . "$MODDIR/patch/recovery_state.sh"
+    patchnest_resume_recovery_monitoring healthy-kpatch-hello
 }
 
 # Self-cleanup if the module was removed improperly.
