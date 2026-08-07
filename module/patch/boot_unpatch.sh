@@ -49,12 +49,11 @@ json_bool() {
 }
 
 # Select only a backup that is cryptographically bound to this exact target.
-# Legacy manifests without target/digest fields are intentionally ineligible for
-# automatic flashing. They may still be inspected/exported manually.
+# Glob expansion is lexical; timestamp-prefixed backup names therefore let the
+# last valid entry replace earlier ones without parsing `ls` or using non-POSIX -nt.
 select_verified_backup() {
     [ -d "$BACKUP_DIR" ] || return 1
 
-    best_manifest=""
     best_backup=""
     for manifest in "$BACKUP_DIR"/boot_backup_*.json; do
         [ -f "$manifest" ] || continue
@@ -72,10 +71,7 @@ select_verified_backup() {
         actual_sha=$(sha256sum "$backup" 2>/dev/null | awk '{print $1}')
         [ "$actual_sha" = "$recorded_sha" ] || continue
 
-        if [ -z "$best_manifest" ] || [ "$manifest" -nt "$best_manifest" ]; then
-            best_manifest="$manifest"
-            best_backup="$backup"
-        fi
+        best_backup="$backup"
     done
 
     [ -n "$best_backup" ] || return 1
