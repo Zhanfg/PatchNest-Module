@@ -20,7 +20,7 @@ RECOVERY_STATE="$PNDIR/recovery_state.json"
 KPM_DIR="$PNDIR/kpm"
 KPM_EVENT_DIR="$PNDIR/kpm_events"
 KPM_QUARANTINE_DIR="$PNDIR/kpm_quarantine"
-KPM_FAILED_DIR="$KPM_DIR/failed"
+KPM_FAILED_DIR="$PNDIR/kpm_failed"
 KPM_ADMISSION_LOG="$PNDIR/kpm_admission.log"
 THRESHOLD=3
 POLICY_READY=true
@@ -66,27 +66,81 @@ normalize_signature_policy() {
   return 0
 }
 
+safe_module_id() {
+  _candidate=$(printf '%s' "$1" | tr -cd 'A-Za-z0-9_.-')
+  [ -n "$_candidate" ] || _candidate=unknown
+  printf '%.64s' "$_candidate"
+}
+
+# Move one primary object and all of its sidecars into a single transaction
+# directory. A complete manifest is written last; management tools ignore an
+# interrupted entry that never reaches state=complete.
 move_with_sidecars() {
   _source=$1
-  _destination_dir=$2
+  _destination_root=$2
+  _reason=$3
   _base=$(basename "$_source")
   _stem=${_base%.*}
-  _destination="$_destination_dir/$_base"
-  _suffix=$(date +%s 2>/dev/null || printf '0')
-  if [ -e "$_destination" ]; then
-    _destination="$_destination_dir/${_base}.${_suffix}.$$"
-  fi
-  mv "$_source" "$_destination" 2>/dev/null || return 1
+  _module_id=$(safe_module_id "$_stem")
+  _epoch=$(date +%s 2>/dev/null || printf '0')
+  _stamp=$(date -u +%Y%m%dT%H%M%SZ 2>/dev/null || printf 'unknown')
+  _entry_id="${_module_id}-${_epoch}-$$"
+  _entry="$_destination_root/$_entry_id"
 
-  for _sidecar in \
-    "$KPM_DIR/${_stem}.kpm.sig" \
-    "$KPM_EVENT_DIR/${_stem}.events" \
-    "$KPM_EVENT_DIR/${_stem}.args" \
-    "$KPM_EVENT_DIR/${_stem}.autoload"; do
-    [ -e "$_sidecar" ] || continue
-    _sidecar_base=$(basename "$_sidecar")
-    mv "$_sidecar" "$_destination_dir/${_sidecar_base}.${_suffix}.$$" 2>/dev/null || true
-  done
+  case "$_base" in
+    *.kpm) _primary_name=module.kpm ;;
+    *.ko) _primary_name=module.ko ;;
+    *.o) _primary_name=module.o ;;
+    *) return 1 ;;
+  esac
+
+  mkdir -p "$_destination_root" || return 1
+  [ ! -e "$_entry" ] || return 1
+  mkdir "$_entry" || return 1
+  chmod 0700 "$_entry" 2>/dev/null || true
+  printf '%s\n' 'state=staging' >"$_entry/state" || { rmdir "$_entry" 2>/dev/null || true; return 1; }
+
+  if ! mv "$_source" "$_entry/$_primary_name"; then
+    rm -rf "$_entry"
+    return 1
+  fi
+
+  if [ -e "$KPM_DIR/${_stem}.kpm.sig" ]; then
+    mv "$KPM_DIR/${_stem}.kpm.sig" "$_entry/module.kpm.sig" \
+      || admission_log "could not move signature sidecar for $_base"
+  fi
+  if [ -e "$KPM_EVENT_DIR/${_stem}.events" ]; then
+    mv "$KPM_EVENT_DIR/${_stem}.events" "$_entry/events" \
+      || admission_log "could not move event sidecar for $_base"
+  fi
+  if [ -e "$KPM_EVENT_DIR/${_stem}.args" ]; then
+    mv "$KPM_EVENT_DIR/${_stem}.args" "$_entry/args" \
+      || admission_log "could not move argument sidecar for $_base"
+  fi
+  if [ -e "$KPM_EVENT_DIR/${_stem}.autoload" ]; then
+    mv "$KPM_EVENT_DIR/${_stem}.autoload" "$_entry/autoload" \
+      || admission_log "could not move autoload sidecar for $_base"
+  fi
+
+  _created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)
+  _manifest_tmp="$_entry/manifest.properties.tmp"
+  cat >"$_manifest_tmp" <<EOF
+schema_version=1
+state=complete
+entry_id=$_entry_id
+module_id=$_module_id
+reason=$_reason
+created_at=$_created_at
+primary=$_primary_name
+source_basename=$_base
+EOF
+  chmod 0600 "$_manifest_tmp" 2>/dev/null || true
+  mv "$_manifest_tmp" "$_entry/manifest.properties" || {
+    admission_log "quarantine manifest finalization failed for $_entry_id"
+    return 1
+  }
+  printf '%s\n' 'state=complete' >"$_entry/state"
+  admission_log "stored transaction entry=$_entry_id module=$_module_id reason=$_reason"
   return 0
 }
 
@@ -100,7 +154,8 @@ fi
 for _object in "$KPM_DIR"/*.ko "$KPM_DIR"/*.o; do
   [ -e "$_object" ] || continue
   admission_log "rejected non-KPM object: $(basename "$_object")"
-  move_with_sidecars "$_object" "$KPM_FAILED_DIR" || admission_log "failed to move rejected object: $_object"
+  move_with_sidecars "$_object" "$KPM_FAILED_DIR" non-kpm-object \
+    || admission_log "failed to store rejected object transaction: $_object"
 done
 
 for _kpm in "$KPM_DIR"/*.kpm; do
@@ -108,10 +163,12 @@ for _kpm in "$KPM_DIR"/*.kpm; do
   _name=$(basename "$_kpm" .kpm)
   if [ "$POLICY_READY" != "true" ]; then
     admission_log "quarantined KPM because signature policy is unavailable: ${_name}.kpm"
-    move_with_sidecars "$_kpm" "$KPM_QUARANTINE_DIR" || admission_log "failed to quarantine: $_kpm"
+    move_with_sidecars "$_kpm" "$KPM_QUARANTINE_DIR" signature-policy-unavailable \
+      || admission_log "failed to quarantine: $_kpm"
   elif [ ! -f "$KPM_EVENT_DIR/${_name}.autoload" ]; then
     admission_log "quarantined non-autoload KPM: ${_name}.kpm"
-    move_with_sidecars "$_kpm" "$KPM_QUARANTINE_DIR" || admission_log "failed to quarantine: $_kpm"
+    move_with_sidecars "$_kpm" "$KPM_QUARANTINE_DIR" autoload-disabled \
+      || admission_log "failed to quarantine: $_kpm"
   fi
 done
 
