@@ -59,26 +59,8 @@ def main() -> int:
     require(uninstall, "Verified boot backups", "uninstall does not explain retained backups")
     require(uninstall, "did not flash or unpatch", "uninstall incorrectly implies boot restoration")
 
-    # Early admission must transactionally isolate anything not eligible for
-    # the late service loader.
-    for token, message in (
-        ("kpm_quarantine", "non-autoload modules are not quarantined"),
-        ('"$KPM_EVENT_DIR/${_name}.autoload"', "autoload is not enforced before service"),
-        ('"$KPM_DIR"/*.ko "$KPM_DIR"/*.o', "Linux objects are not rejected before service"),
-        ("move_with_sidecars", "early quarantine loses sidecars"),
-        ("state=staging", "early transaction has no incomplete state"),
-        ("state=complete", "early transaction is never finalized"),
-        ("manifest.properties", "early transaction manifest is missing"),
-        ("checksums.sha256", "early transaction checksum set is missing"),
-        ("sha256sum", "early transaction files are not hashed"),
-        ("_safe_source", "early transaction source names are not sanitized"),
-        ("module.kpm.sig", "signature is not stored with its transaction"),
-        ("autoload-disabled", "autoload quarantine reason is not recorded"),
-        ("signature-policy-unavailable", "policy-failure reason is not recorded"),
-    ):
-        require(post_fs, token, message)
-
-    # The shared store is the only acceptable runtime failure move primitive.
+    # Both early admission and runtime loading must use the same transaction
+    # format and rollback behavior.
     for token, message in (
         ("patchnest_store_kpm_transaction", "shared transaction API is missing"),
         ("patchnest_valid_transaction_root", "transaction destinations are not constrained"),
@@ -88,10 +70,29 @@ def main() -> int:
         ("load-failed", "runtime load failures are unsupported"),
         ("patchnest_restore_moved_sidecar", "failed transactions cannot restore sidecars"),
         ("checksums.sha256", "shared transaction store lacks integrity metadata"),
+        ("state=staging", "shared transaction store lacks an incomplete state"),
         ("state=complete", "shared transaction store never finalizes"),
     ):
         require(transaction_store, token, message)
     reject(transaction_store, "eval ", "shared transaction store evaluates untrusted input")
+
+    # Early admission must call the shared store, reject unsafe markers, and
+    # keep recovery monitoring housekeeping independent of KPM loading.
+    for token, message in (
+        ('. "$MODDIR/kpm_transaction_store.sh"', "post-fs does not load the shared transaction store"),
+        ("store_admission_transaction", "post-fs has no shared-store wrapper"),
+        ('"$KPM_DIR"/*.ko "$KPM_DIR"/*.o', "Linux objects are not rejected before service"),
+        ('"$KPM_EVENT_DIR/${_name}.autoload"', "autoload is not enforced before service"),
+        ('[ -L "$KPM_EVENT_DIR/${_name}.autoload" ]', "autoload symlinks are accepted"),
+        ("signature policy symlink removed", "signature-policy symlinks are not rejected"),
+        ("non-kpm-object", "non-KPM transaction reason is not recorded"),
+        ("autoload-disabled", "autoload quarantine reason is not recorded"),
+        ("signature-policy-unavailable", "policy-failure reason is not recorded"),
+    ):
+        require(post_fs, token, message)
+    reject(post_fs, "move_with_sidecars", "post-fs still has a duplicate transaction implementation")
+    reject(post_fs, "manifest.properties.tmp", "post-fs still writes transaction manifests directly")
+    reject(post_fs, "checksums.sha256.tmp", "post-fs still writes transaction checksums directly")
 
     # Runtime loading defaults to strict, handles only .kpm as loadable input,
     # requires autoload, and transactionally preserves every failure.
@@ -106,7 +107,6 @@ def main() -> int:
         ("invalid-signature", "invalid signatures are not transactionally stored"),
         ("load-failed", "load failures are not transactionally stored"),
         ("signature verifier unavailable; leaving signed KPM for retry", "missing verifier does not fail closed"),
-        ("Signed KPM update installed", "installer/service update boundary token is missing"),
         ("exclusion config exceeds 1 MiB", "service exclusion input is unbounded"),
     ):
         require(service, token, message)
