@@ -1,8 +1,13 @@
 #!/system/bin/sh
 #######################################################################################
-# PatchNest Boot Image Unpatcher
+# PatchNest current-image unpatcher
 #
 # Usage: boot_unpatch.sh <bootimage> [flash_to_device:true|false]
+#
+# This script only removes PatchNest from the selected current boot image by
+# unpacking, unpatching, repacking, and validating that image. It never selects
+# or flashes a stored backup. Verified backup restoration is implemented only
+# by boot_restore_verified.sh.
 #
 # `false` generates and verifies an unpatched image without writing a block
 # device. A direct block-device write requires either the short-lived one-time
@@ -11,8 +16,7 @@
 #######################################################################################
 
 MODPATH=${0%/*}
-PNDIR="/data/adb/patchnest"
-BACKUP_DIR="$PNDIR/backup"
+PNDIR=/data/adb/patchnest
 APPROVAL_FILE="$PNDIR/unpatch_approval"
 APPROVAL_MAX_AGE=120
 BOOTIMAGE=${1:-}
@@ -20,20 +24,6 @@ FLASH_TO_DEVICE=${2:-true}
 
 . "$MODPATH/util_functions.sh"
 . "$MODPATH/flash_guard.sh"
-
-manifest_string() {
-  _manifest=$1
-  _key=$2
-  grep -o "\"${_key}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$_manifest" 2>/dev/null \
-    | head -n 1 | sed -E 's/.*:[[:space:]]*"([^"]*)".*/\1/'
-}
-
-manifest_bool() {
-  _manifest=$1
-  _key=$2
-  grep -o "\"${_key}\"[[:space:]]*:[[:space:]]*[a-z]*" "$_manifest" 2>/dev/null \
-    | head -n 1 | sed -E 's/.*:[[:space:]]*([a-z]*).*/\1/'
-}
 
 validate_boot_image() {
   _image=$1
@@ -68,9 +58,7 @@ require_flash_approval() {
   }
 
   _size=$(wc -c <"$APPROVAL_FILE" 2>/dev/null || true)
-  case "$_size" in
-    ''|*[!0-9]*) _size=999999 ;;
-  esac
+  case "$_size" in ''|*[!0-9]*) _size=999999 ;; esac
   [ "$_size" -le 256 ] || {
     echo "! Unpatch approval file is malformed" >&2
     rm -f "$APPROVAL_FILE" 2>/dev/null || true
@@ -124,62 +112,6 @@ require_flash_approval() {
   return 0
 }
 
-select_verified_backup() {
-  _target=$1
-  _target_name=$(partition_name_for_target "$_target")
-
-  [ -d "$BACKUP_DIR" ] || return 1
-  for _candidate in $(ls -1t "$BACKUP_DIR"/boot_backup_*.img 2>/dev/null); do
-    [ -s "$_candidate" ] || continue
-    _manifest="${_candidate%.img}.json"
-    [ -f "$_manifest" ] || continue
-
-    _verified=$(manifest_bool "$_manifest" backup_verified)
-    [ "$_verified" = "true" ] || continue
-
-    _recorded_target=$(manifest_string "$_manifest" boot_image)
-    [ "$_recorded_target" = "$_target_name" ] || continue
-
-    _recorded_sha=$(manifest_string "$_manifest" backup_sha256)
-    printf '%s' "$_recorded_sha" | grep -Eq '^[0-9a-f]{64}$' || continue
-    _actual_sha=$(image_stream_sha256 "$_candidate" 2>/dev/null)
-    [ "$_actual_sha" = "$_recorded_sha" ] || continue
-
-    validate_boot_image "$_candidate" || continue
-    printf '%s\n' "$_candidate"
-    return 0
-  done
-  return 1
-}
-
-# Separate recovery primitive. This is not the normal WebUI unpatch path: it
-# restores a target-bound verified backup and must be wired through its own
-# explicit recovery UX before use.
-auto_unpatch() {
-  [ -n "$BOOTIMAGE" ] && [ -e "$BOOTIMAGE" ] || {
-    echo "! auto_unpatch: BOOTIMAGE not set or missing ($BOOTIMAGE)" >&2
-    return 1
-  }
-  assert_kernel_boot_target "$BOOTIMAGE" || return 2
-
-  _backup=$(select_verified_backup "$BOOTIMAGE") || {
-    echo "! auto_unpatch: no verified backup matches the active target" >&2
-    return 3
-  }
-
-  echo "- auto_unpatch: verified backup: $_backup"
-  flash_image "$_backup" "$BOOTIMAGE"
-  _rc=$?
-  if [ "$_rc" -ne 0 ]; then
-    echo "! auto_unpatch: flash/readback verification failed ($_rc)" >&2
-    return 4
-  fi
-
-  echo "0" >"$PNDIR/boot_count" 2>/dev/null || true
-  echo "- auto_unpatch: flash successful and verified"
-  return 0
-}
-
 [ -n "$BOOTIMAGE" ] && [ -e "$BOOTIMAGE" ] || {
   echo "! Target image does not exist: $BOOTIMAGE" >&2
   exit 1
@@ -201,7 +133,7 @@ magiskboot cleanup >/dev/null 2>&1 || true
 rm -f kernel kernel.ori new-boot.img
 
 echo "- Target image: $BOOTIMAGE"
-echo "- Unpacking boot image"
+echo "- Unpacking current boot image"
 if ! magiskboot unpack "$BOOTIMAGE" >/dev/null 2>&1; then
   echo "! Unpack error" >&2
   exit 1
@@ -216,7 +148,7 @@ if ! kptools -i kernel -l 2>/dev/null | grep -q 'patched=true'; then
 fi
 
 mv kernel kernel.ori || { echo "! Failed to preserve patched kernel" >&2; exit 1; }
-echo "- Unpatching kernel"
+echo "- Removing PatchNest from current kernel"
 if ! kptools -u --image kernel.ori --out kernel; then
   echo "! Unpatch error" >&2
   rm -f kernel
@@ -230,14 +162,14 @@ if kptools -i kernel -l 2>/dev/null | grep -q 'patched=true'; then
   exit 1
 fi
 
-echo "- Repacking boot image"
+echo "- Repacking current boot image"
 if ! magiskboot repack "$BOOTIMAGE" >/dev/null 2>&1; then
   echo "! Repack error" >&2
   exit 1
 fi
 [ -s new-boot.img ] || { echo "! Repack produced no non-empty new-boot.img" >&2; exit 1; }
 
-echo "- Validating unpatched boot image"
+echo "- Validating generated current-image replacement"
 if ! validate_boot_image new-boot.img; then
   echo "! Unpatched boot image validation failed" >&2
   save_image_to_storage new-boot.img
@@ -245,7 +177,7 @@ if ! validate_boot_image new-boot.img; then
 fi
 
 if [ "$FLASH_TO_DEVICE" = "true" ]; then
-  echo "- Flashing boot image"
+  echo "- Flashing generated current-image replacement"
   flash_image new-boot.img "$BOOTIMAGE"
   flash_rc=$?
   if [ "$flash_rc" -ne 0 ]; then
@@ -253,13 +185,13 @@ if [ "$FLASH_TO_DEVICE" = "true" ]; then
     save_image_to_storage new-boot.img
     exit 1
   fi
-  echo "- Flash successful and verified"
+  echo "- Current boot image unpatched and read back successfully"
 else
   if ! save_image_to_storage new-boot.img; then
     echo "! Could not save verified unpatched image" >&2
     exit 1
   fi
-  echo "- Successfully unpatched; image saved without flashing"
+  echo "- Successfully unpatched current image; output saved without flashing"
 fi
 
 magiskboot cleanup >/dev/null 2>&1 || true
