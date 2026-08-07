@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Offline contracts for module install, uninstall, KPM admission, and status."""
+"""Offline contracts for install, uninstall, KPM admission, and quarantine."""
 
 from __future__ import annotations
 
 import re
 import sys
 from pathlib import Path
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -38,96 +37,121 @@ def main() -> int:
     quarantine = read("module/manage_kpm_quarantine.sh")
     service = read("module/service.sh")
 
+    # Package installation and persistent-state boundaries.
     reject(customize, 'rm -rf "$MODDIR/webroot"', "destructive self-copy hot update returned")
     reject(customize, 'cp -rf "$MODPATH/webroot"', "installer still recopies its active module directory")
-    require(customize, "patch/flash_guard.sh", "package validation omits the flash guard")
-    require(customize, "patch/boot_target.sh", "package validation omits boot-only discovery")
-    require(customize, "patch/boot_restore_verified.sh", "package validation omits the verified restore helper")
-    require(customize, "patch/kptools_argv.sh", "package validation omits the argv compatibility helper")
-    require(customize, "manage_kpm_quarantine.sh", "package validation omits the quarantine manager")
-    require(customize, "module.prop.bak", "validated module metadata backup is not created")
-    require(customize, "KPM_SIGNATURE_POLICY=strict", "new installations do not default to strict KPM signatures")
-    require(customize, 'if [ ! -e "$STATE_DIR/config" ]', "installer may overwrite existing KPM signature policy")
+    for token, message in (
+        ("patch/flash_guard.sh", "package validation omits the flash guard"),
+        ("patch/boot_target.sh", "package validation omits boot-only discovery"),
+        ("patch/boot_restore_verified.sh", "package validation omits verified restore"),
+        ("patch/kptools_argv.sh", "package validation omits argv normalization"),
+        ("manage_kpm_quarantine.sh", "package validation omits quarantine management"),
+        ("module.prop.bak", "validated module metadata backup is not created"),
+        ("KPM_SIGNATURE_POLICY=strict", "new installs do not default to strict signatures"),
+        ('if [ ! -e "$STATE_DIR/config" ]', "upgrade can overwrite an existing signature policy"),
+    ):
+        require(customize, token, message)
 
     reject(uninstall, "rm -rf /data/adb/patchnest", "uninstall deletes persistent recovery state")
-    require(uninstall, "Verified boot backups", "uninstall notice does not explain retained recovery data")
+    require(uninstall, "Verified boot backups", "uninstall does not explain retained backups")
     require(uninstall, "did not flash or unpatch", "uninstall incorrectly implies boot restoration")
 
-    require(service, '"$KPM_DIR"/*.kpm "$KPM_DIR"/*.ko "$KPM_DIR"/*.o', "expected broad legacy service scan changed; review admission assumptions")
-    require(post_fs, "kpm_quarantine", "non-autoload modules are not quarantined")
-    require(post_fs, '"$KPM_EVENT_DIR/${_name}.autoload"', "autoload marker is not enforced before service")
-    require(post_fs, '"$KPM_DIR"/*.ko "$KPM_DIR"/*.o', "Linux objects are not rejected before KPM loading")
-    require(post_fs, "move_with_sidecars", "KPM quarantine loses associated metadata/signatures")
-    require(post_fs, "state=staging", "quarantine transaction has no incomplete state")
-    require(post_fs, "state=complete", "quarantine transaction is never finalized")
-    require(post_fs, "manifest.properties", "quarantine transaction lacks a machine-readable manifest")
-    require(post_fs, "checksums.sha256", "quarantine transaction lacks an integrity set")
-    require(post_fs, "sha256sum", "quarantine transaction files are not hashed")
-    require(post_fs, "_safe_source", "original quarantine filenames are written without sanitization")
-    require(post_fs, "module.kpm.sig", "signature sidecar is not stored with its transaction")
-    require(post_fs, "autoload-disabled", "non-autoload quarantine reason is not recorded")
-    require(post_fs, "signature-policy-unavailable", "policy-failure quarantine reason is not recorded")
+    # The legacy service loop is broad; post-fs-data must reduce the live set.
+    require(service, '"$KPM_DIR"/*.kpm "$KPM_DIR"/*.ko "$KPM_DIR"/*.o', "service scan changed; review admission assumptions")
+    for token, message in (
+        ("kpm_quarantine", "non-autoload modules are not quarantined"),
+        ('"$KPM_EVENT_DIR/${_name}.autoload"', "autoload is not enforced before service"),
+        ('"$KPM_DIR"/*.ko "$KPM_DIR"/*.o', "Linux objects are not rejected before service"),
+        ("move_with_sidecars", "quarantine loses sidecars"),
+        ("state=staging", "transaction has no incomplete state"),
+        ("state=complete", "transaction is never finalized"),
+        ("manifest.properties", "transaction manifest is missing"),
+        ("checksums.sha256", "transaction checksum set is missing"),
+        ("sha256sum", "transaction files are not hashed"),
+        ("_safe_source", "source names are not sanitized"),
+        ("module.kpm.sig", "signature is not stored with its transaction"),
+        ("autoload-disabled", "autoload quarantine reason is not recorded"),
+        ("signature-policy-unavailable", "policy-failure reason is not recorded"),
+    ):
+        require(post_fs, token, message)
 
-    require(status, "awk -v key=", "status still relies on a delimiter-sensitive sed replacement")
-    reject(status, 'sed "s|^$prop=', "pipe-delimited sed status update returned")
+    # Status updates must tolerate pipe characters and resolve stale recovery state.
+    require(status, "awk -v key=", "status uses delimiter-sensitive replacement")
+    reject(status, 'sed "s|^$prop=', "pipe-delimited sed update returned")
     require(status, "mark_boot_healthy", "healthy boot does not resolve recovery state")
     require(status, '"recovery_requested": false', "healthy state does not clear recovery request")
-    require(status, '"resolution": "healthy_kpatch_hello"', "healthy state lacks an explicit resolution")
+    require(status, '"resolution": "healthy_kpatch_hello"', "healthy state lacks a resolution")
 
-    require(installer, '"$MODDIR"/tmp/*', "WebUI upload staging path is not accepted")
-    require(installer, "unzip -Z1", "ZIP entries are not preflighted before extraction")
-    require(installer, "ZIP contains symbolic links", "symbolic-link entries are not rejected")
-    require(installer, "Extracted ZIP exceeds 32 MiB", "extracted-size limit is missing")
-    require(installer, "Linux .ko/.o files are not KernelPatch KPM artifacts", "Linux objects are accepted as KPMs")
-    require(installer, "ZIP contains multiple KPM binaries", "multi-binary archives are not rejected")
-    require(installer, "KPM binary failed kptools validation", "binary KPM validation is missing")
-    require(installer, "Compiled KPM failed kptools validation", "compiled KPM validation is missing")
-    require(installer, "KPM signature verification failed", "supplied invalid signatures are not fatal")
-    require(installer, "Unsigned KPM prepared with autoload disabled", "unsigned KPM can request autoload")
-    require(installer, 'kpatch kpm load "$DEST_KPM" -- "$MOD_ARGS"', "immediate-load arguments are not passed as one quoted argv value")
-    reject(installer, 'ARGS_OPT="-- $MOD_ARGS"', "unquoted argument concatenation returned")
-    require(installer, "Another KPM installation is already running", "concurrent KPM installation lock is missing")
-    require(installer, ".kpm-stage.$$", "installation files are not prepared in a staging directory")
-    require(installer, 'mv "$STAGE_DIR/module.kpm" "$DEST_KPM"', "KPM binary is not committed after staged metadata")
+    # KPM package admission: exact prebuilt artifact, bounded ZIP, verified digest.
+    for token, message in (
+        ('"$MODDIR"/tmp/*', "WebUI upload staging path is not accepted"),
+        ("unzip -Z1", "ZIP entries are not preflighted"),
+        ("ZIP contains symbolic links", "symbolic links are not rejected"),
+        ("Extracted ZIP exceeds 32 MiB", "extracted-size bound is missing"),
+        ("Linux .ko/.o files are not KernelPatch KPM artifacts", "Linux objects are accepted"),
+        ("On-device KPM source compilation is disabled; provide one prebuilt .kpm", "source packages are not rejected"),
+        ("ZIP must contain exactly one prebuilt KPM binary", "ambiguous KPM packages are accepted"),
+        ("KPM binary failed kptools validation", "binary parsing is not required"),
+        ("KPM signature verification failed", "invalid supplied signatures are not fatal"),
+        ("Unsigned KPM prepared with autoload disabled", "unsigned KPM can request autoload"),
+        ('kpatch kpm load "$DEST_KPM" -- "$MOD_ARGS"', "immediate-load args are not one argv value"),
+        ("Another KPM installation is already running", "concurrent installs are not serialized"),
+        (".kpm-stage.$$", "installation is not staged"),
+        ('mv "$STAGE_DIR/module.kpm" "$DEST_KPM"', "binary is not committed last"),
+        ('ZIP_NAME="${MOD_ID}.zip"', "retained ZIP does not use its final filename"),
+        ('sha256sum "$ZIP_NAME" >"$ZIP_DIGEST_NAME"', "staged ZIP digest is not relative/final-name bound"),
+        ('sha256sum -c "$ZIP_DIGEST_NAME"', "installed ZIP digest is not rechecked"),
+        ("Installed ZIP does not match its retained digest", "final ZIP mismatch is not fatal"),
+    ):
+        require(installer, token, message)
+    for forbidden, message in (
+        ('ARGS_OPT="-- $MOD_ARGS"', "unquoted argument concatenation returned"),
+        ('"$MODDIR/compile_kpm.sh" "$TMPDIR/root"', "installer invokes on-device source compilation"),
+        ("Compiled KPM failed kptools validation", "old source-compilation path returned"),
+        ('sha256sum "$STAGE_DIR/source.zip"', "digest still records a staging path"),
+    ):
+        reject(installer, forbidden, message)
 
-    # Quarantine management is intentionally recovery-oriented: list/inspect
-    # are read-only; activation accepts only a signed KPM transaction and never
-    # overwrites a live module. There is no delete/force path.
-    require(quarantine, "list_entries", "quarantine manager has no read-only listing")
-    require(quarantine, "inspect_entry", "quarantine manager has no read-only inspection")
-    require(quarantine, "activate_entry", "quarantine manager has no verified activation path")
-    require(quarantine, "verify_entry_checksums", "quarantine transactions are not integrity-checked")
-    require(quarantine, "sha256sum -c checksums.sha256", "transaction digest set is not verified")
-    require(quarantine, "is_allowed_transaction_name", "unknown transaction files are not rejected")
-    require(quarantine, "Quarantine transaction checksum verification failed", "activation does not fail on transaction tampering")
-    require(quarantine, "Only quarantined .kpm transactions can be activated", "non-KPM transactions can be activated")
-    require(quarantine, "Quarantined KPM failed kptools validation", "activation skips KPM parsing")
-    require(quarantine, "Quarantined KPM signature is invalid", "activation skips signature validation")
-    require(quarantine, "Live KPM already exists", "activation can overwrite an existing module")
-    require(quarantine, "Activation commit failed and was rolled back", "activation has no rollback path")
-    require(quarantine, ".quarantine-manager.lock", "concurrent quarantine activation is not serialized")
-    require(quarantine, "Reboot to load it through the normal admission path", "activation bypasses the normal boot admission path")
-    reject(quarantine, "eval ", "quarantine manager evaluates untrusted manifest content")
-    reject(quarantine, "--force", "quarantine manager exposes a force-overwrite path")
+    # Quarantine activation is recovery-oriented, signed, checksummed, and no-overwrite.
+    for token, message in (
+        ("list_entries", "read-only listing is missing"),
+        ("inspect_entry", "read-only inspection is missing"),
+        ("activate_entry", "verified activation is missing"),
+        ("verify_entry_checksums", "transaction checksums are not verified"),
+        ("sha256sum -c checksums.sha256", "digest set is not checked"),
+        ("is_allowed_transaction_name", "unknown files are not rejected"),
+        ("Quarantine transaction checksum verification failed", "tampering is not fatal"),
+        ("Only quarantined .kpm transactions can be activated", "non-KPM transaction can activate"),
+        ("Quarantined KPM failed kptools validation", "activation skips KPM parsing"),
+        ("Quarantined KPM signature is invalid", "activation skips signature verification"),
+        ("Live KPM already exists", "activation can overwrite a live KPM"),
+        ("Activation commit failed and was rolled back", "activation lacks rollback"),
+        (".quarantine-manager.lock", "activation is not serialized"),
+        ("Reboot to load it through the normal admission path", "activation bypasses normal admission"),
+    ):
+        require(quarantine, token, message)
+    reject(quarantine, "eval ", "quarantine manager evaluates manifest content")
+    reject(quarantine, "--force", "quarantine manager exposes force overwrite")
     if re.search(r"(?m)^\s*delete\)", quarantine):
-        raise AssertionError("quarantine manager exposes a destructive delete command")
+        raise AssertionError("quarantine manager exposes destructive delete")
 
-    # Ed25519 verification must wrap the raw key as RFC 8410 SubjectPublicKeyInfo
-    # and use the raw-message pkeyutl interface. A raw key passed to `dgst`
-    # cannot be interpreted as a public key object.
-    require(verifier, "302a300506032b6570032100", "Ed25519 RFC 8410 SPKI prefix is missing")
-    require(verifier, "openssl pkeyutl", "signature verification does not use pkeyutl")
-    require(verifier, "-pubin", "signature verification does not mark the key as public")
-    require(verifier, "-keyform DER", "signature verification does not parse the generated DER key")
-    require(verifier, "-rawin", "Ed25519 verification does not use the raw-message interface")
-    require(verifier, "-sigfile", "signature bytes are not passed through sigfile")
-    require(verifier, "signature file exceeds 4096 bytes", "signature input size is unbounded")
-    require(verifier, "mktemp -d", "signature verification lacks an unpredictable private temp directory")
+    # Ed25519 verifier must use RFC 8410 DER and pkeyutl raw-message verification.
+    for token, message in (
+        ("302a300506032b6570032100", "Ed25519 SPKI prefix is missing"),
+        ("openssl pkeyutl", "pkeyutl is not used"),
+        ("-pubin", "public-key mode is missing"),
+        ("-keyform DER", "DER key parsing is missing"),
+        ("-rawin", "raw-message mode is missing"),
+        ("-sigfile", "signature file is not supplied"),
+        ("signature file exceeds 4096 bytes", "signature input is unbounded"),
+        ("mktemp -d", "private unpredictable temp directory is missing"),
+    ):
+        require(verifier, token, message)
     reject(verifier, "openssl dgst -ed25519", "broken raw-key dgst verification returned")
-    reject(verifier, "mkdir -p \"$_tmpdir\"", "predictable world-writable temp fallback returned")
-    reject(verifier, "trap '", "sourced verifier overwrites caller signal traps")
+    reject(verifier, 'mkdir -p "$_tmpdir"', "predictable temp fallback returned")
+    reject(verifier, "trap '", "sourced verifier replaces caller traps")
 
-    if re.search(r"case \"\$_resolved\" in[\s\S]*?\*/data/local/tmp", installer):
+    if re.search(r'case "\$_resolved" in[\s\S]*?\*/data/local/tmp', installer):
         raise AssertionError("trusted KPM source path pattern is not rooted")
 
     print("Install and KPM lifecycle contracts validated.")
