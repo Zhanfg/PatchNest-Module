@@ -41,6 +41,7 @@ for _required_file in \
     bin/magiskboot \
     patch/boot_extract.sh \
     patch/boot_patch.sh \
+    patch/boot_restore_verified.sh \
     patch/boot_unpatch.sh \
     patch/flash_guard.sh \
     patch/boot_target.sh \
