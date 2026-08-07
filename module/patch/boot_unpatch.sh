@@ -88,8 +88,10 @@ auto_unpatch() {
 
     echo "- auto_unpatch: verified backup: $verified_backup"
     echo "- auto_unpatch: target: $BOOT_TARGET"
-    if ! flash_image "$verified_backup" "$BOOT_TARGET"; then
-        >&2 echo "! auto_unpatch: verified flash failed"
+    flash_image "$verified_backup" "$BOOT_TARGET"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        >&2 echo "! auto_unpatch: verified flash failed: $rc"
         return 4
     fi
 
@@ -130,8 +132,9 @@ fi
 [ -s new-boot.img ] || { >&2 echo "! Repack produced no new-boot.img"; exit 1; }
 
 echo "- Flashing unpatched boot image"
-if ! flash_image "$WORKDIR/new-boot.img" "$BOOT_TARGET"; then
-    rc=$?
+flash_image "$WORKDIR/new-boot.img" "$BOOT_TARGET"
+rc=$?
+if [ "$rc" -ne 0 ]; then
     >&2 echo "! Flash failed: $rc"
     save_image_to_storage "$WORKDIR/new-boot.img"
     exit 1
