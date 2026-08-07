@@ -16,7 +16,6 @@ ZIP_FILE=${1:-}
 TMPDIR=""
 STAGE_DIR=""
 PREVIOUS_DIR=""
-LOCK_DIR="$PNDIR/.kpm-install.lock"
 MAX_ZIP_BYTES=$((64 * 1024 * 1024))
 MAX_EXTRACTED_BYTES=$((32 * 1024 * 1024))
 COMMIT_STARTED=false
@@ -31,6 +30,12 @@ DEST_PROP=""
 DEST_EVENTS=""
 DEST_ARGS=""
 DEST_AUTOLOAD=""
+
+# shellcheck disable=SC1091
+. "$MODDIR/kpm_install_recovery.sh" 2>/dev/null || {
+    echo "! Cannot load durable KPM install recovery helper" >&2
+    exit 1
+}
 
 log() {
     mkdir -p "$PNDIR" 2>/dev/null || true
@@ -84,7 +89,7 @@ cleanup() {
     rollback_install || true
     [ -z "$TMPDIR" ] || rm -rf "$TMPDIR"
     [ -z "$STAGE_DIR" ] || rm -rf "$STAGE_DIR"
-    rmdir "$LOCK_DIR" 2>/dev/null || true
+    patchnest_release_install_lock 2>/dev/null || true
 }
 trap cleanup 0 1 2 15
 
@@ -189,13 +194,15 @@ move_existing_to_previous() {
 
 validate_zip_source
 mkdir -p "$PNDIR" || fail "Cannot create PatchNest state directory"
-mkdir "$LOCK_DIR" 2>/dev/null || fail "Another KPM installation is already running"
-TMPDIR=$(mktemp -d /data/local/tmp/patchnest-kpm.XXXXXX) || fail "Cannot create extraction directory"
-STAGE_DIR="$PNDIR/.kpm-stage.$$"
-PREVIOUS_DIR="$STAGE_DIR/previous"
-mkdir "$STAGE_DIR" "$PREVIOUS_DIR" || fail "Cannot create installation stage"
-chmod 0700 "$STAGE_DIR" "$PREVIOUS_DIR" 2>/dev/null || true
+patchnest_acquire_install_lock
+_lock_rc=$?
+case "$_lock_rc" in
+    0) ;;
+    2) fail "Another KPM installation is already running" ;;
+    *) fail "Cannot recover stale KPM installation state" ;;
+esac
 
+TMPDIR=$(mktemp -d /data/local/tmp/patchnest-kpm.XXXXXX) || fail "Cannot create extraction directory"
 preflight_zip_entries
 mkdir -p "$TMPDIR/root"
 unzip -o "$ZIP_FILE" -d "$TMPDIR/root" >/dev/null 2>&1 || fail "Failed to extract ZIP"
@@ -264,6 +271,13 @@ if [ "$SIGNATURE_VALID" != "true" ]; then
     log "Unsigned KPM prepared with autoload disabled: $MOD_ID"
 fi
 
+STAGE_DIR="$PNDIR/.kpm-stage.$$"
+PREVIOUS_DIR="$STAGE_DIR/previous"
+mkdir "$STAGE_DIR" "$PREVIOUS_DIR" || fail "Cannot create installation stage"
+chmod 0700 "$STAGE_DIR" "$PREVIOUS_DIR" 2>/dev/null || true
+patchnest_write_install_journal "$STAGE_DIR" preparing "$MOD_ID" \
+    || fail "Cannot initialize durable KPM install journal"
+
 ZIP_NAME="${MOD_ID}.zip"
 ZIP_DIGEST_NAME="${MOD_ID}.zip.sha256"
 stage_file "$BUILT_KPM" module.kpm 0600 || fail "Cannot stage KPM binary"
@@ -292,6 +306,8 @@ DEST_ARGS="$KPM_EVENT_DIR/${MOD_ID}.args"
 DEST_AUTOLOAD="$KPM_EVENT_DIR/${MOD_ID}.autoload"
 
 COMMIT_STARTED=true
+patchnest_write_install_journal "$STAGE_DIR" backup "$MOD_ID" \
+    || fail "Cannot enter durable KPM backup phase"
 move_existing_to_previous "$DEST_KPM" kpm
 move_existing_to_previous "$DEST_SIG" sig
 move_existing_to_previous "$DEST_ZIP" zip
@@ -300,6 +316,8 @@ move_existing_to_previous "$DEST_PROP" prop
 move_existing_to_previous "$DEST_EVENTS" events
 move_existing_to_previous "$DEST_ARGS" args
 move_existing_to_previous "$DEST_AUTOLOAD" autoload
+patchnest_write_install_journal "$STAGE_DIR" writing "$MOD_ID" \
+    || fail "Cannot enter durable KPM write phase"
 COMMIT_WRITING=true
 
 mv "$STAGE_DIR/$ZIP_NAME" "$DEST_ZIP" || fail "Cannot install source ZIP"
@@ -339,5 +357,7 @@ else
     log "KPM installed with autoload disabled: $MOD_NAME ($MOD_ID) $MOD_VERSION"
 fi
 
+patchnest_write_install_journal "$STAGE_DIR" complete "$MOD_ID" \
+    || fail "Cannot finalize durable KPM install journal"
 COMMIT_COMPLETE=true
 exit 0
