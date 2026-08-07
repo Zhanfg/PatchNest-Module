@@ -52,7 +52,9 @@ json_bool() {
 select_verified_backup() {
     [ -d "$BACKUP_DIR" ] || return 1
 
-    for manifest in $(ls -1t "$BACKUP_DIR"/boot_backup_*.json 2>/dev/null); do
+    best_manifest=""
+    best_backup=""
+    for manifest in "$BACKUP_DIR"/boot_backup_*.json; do
         [ -f "$manifest" ] || continue
         [ "$(json_bool backup_verified "$manifest")" = "true" ] || continue
 
@@ -68,10 +70,14 @@ select_verified_backup() {
         actual_sha=$(sha256sum "$backup" 2>/dev/null | awk '{print $1}')
         [ "$actual_sha" = "$recorded_sha" ] || continue
 
-        printf '%s\n' "$backup"
-        return 0
+        if [ -z "$best_manifest" ] || [ "$manifest" -nt "$best_manifest" ]; then
+            best_manifest="$manifest"
+            best_backup="$backup"
+        fi
     done
-    return 1
+
+    [ -n "$best_backup" ] || return 1
+    printf '%s\n' "$best_backup"
 }
 
 auto_unpatch() {
