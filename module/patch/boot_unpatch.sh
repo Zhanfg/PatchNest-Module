@@ -1,142 +1,141 @@
 #!/system/bin/sh
 #######################################################################################
-# APatch Boot Image Unpatcher
-# Imported from https://github.com/bmax121/APatch/blob/main/app/src/main/assets/boot_unpatch.sh
+# PatchNest Boot Image Unpatcher
+# Derived from APatch boot_unpatch.sh, hardened for fail-closed recovery.
 #######################################################################################
 
 MODPATH=${0%/*}
-ARCH=$(getprop ro.product.cpu.abi)
 PNDIR="/data/adb/patchnest"
 BACKUP_DIR="$PNDIR/backup"
 AUTORECOVERY_MARKER="$PNDIR/autorecovery_active"
 
-# Load utility functions
+# shellcheck disable=SC1091
 . "$MODPATH/util_functions.sh"
 
-BOOTIMAGE=$1
+BOOTIMAGE=${1:-}
+[ -n "$BOOTIMAGE" ] || { >&2 echo "! BOOTIMAGE is required"; exit 1; }
+[ -e "$BOOTIMAGE" ] || { >&2 echo "! $BOOTIMAGE does not exist"; exit 1; }
+BOOT_TARGET=$(readlink -f "$BOOTIMAGE" 2>/dev/null || printf '%s' "$BOOTIMAGE")
 
-# ============================================================
-# auto_unpatch()
-# Bootloop Auto-Recovery entry point.
-# Flashes back the LATEST backup boot image from
-# /data/adb/patchnest/backup/ to the active boot slot.
-# Leaves the autorecovery_active marker in place until a
-# healthy boot clears it (so the WebUI can show the status).
-# Returns 0 on success, non-zero on failure.
-# ============================================================
+command -v magiskboot >/dev/null 2>&1 || { >&2 echo "! Command magiskboot not found"; exit 1; }
+command -v kptools >/dev/null 2>&1 || { >&2 echo "! Command kptools not found"; exit 1; }
+command -v sha256sum >/dev/null 2>&1 || { >&2 echo "! Command sha256sum not found"; exit 1; }
+
+WORKDIR=$(mktemp -d /data/local/tmp/patchnest_unpatch.XXXXXX) || {
+    >&2 echo "! Cannot create private unpatch workspace"
+    exit 1
+}
+cleanup() {
+    rm -rf "$WORKDIR"
+}
+trap cleanup EXIT HUP INT TERM
+
+json_string() {
+    key="$1"
+    file="$2"
+    grep -o "\"${key}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$file" 2>/dev/null \
+        | head -n 1 \
+        | sed -E "s/.*\"${key}\"[[:space:]]*:[[:space:]]*\"([^\"]*)\".*/\\1/"
+}
+
+json_bool() {
+    key="$1"
+    file="$2"
+    grep -o "\"${key}\"[[:space:]]*:[[:space:]]*(true|false)" "$file" 2>/dev/null \
+        | head -n 1 \
+        | sed -E "s/.*\"${key}\"[[:space:]]*:[[:space:]]*(true|false).*/\\1/"
+}
+
+# Select only a backup that is cryptographically bound to this exact target.
+# Legacy manifests without target/digest fields are intentionally ineligible for
+# automatic flashing. They may still be inspected/exported manually.
+select_verified_backup() {
+    [ -d "$BACKUP_DIR" ] || return 1
+
+    for manifest in $(ls -1t "$BACKUP_DIR"/boot_backup_*.json 2>/dev/null); do
+        [ -f "$manifest" ] || continue
+        [ "$(json_bool backup_verified "$manifest")" = "true" ] || continue
+
+        recorded_target=$(json_string boot_target "$manifest")
+        recorded_sha=$(json_string backup_sha256 "$manifest")
+        backup="${manifest%.json}.img"
+
+        [ -n "$recorded_target" ] || continue
+        [ "$recorded_target" = "$BOOT_TARGET" ] || continue
+        printf '%s' "$recorded_sha" | grep -Eq '^[0-9a-f]{64}$' || continue
+        [ -f "$backup" ] || continue
+
+        actual_sha=$(sha256sum "$backup" 2>/dev/null | awk '{print $1}')
+        [ "$actual_sha" = "$recorded_sha" ] || continue
+
+        printf '%s\n' "$backup"
+        return 0
+    done
+    return 1
+}
+
 auto_unpatch() {
-    if [ -z "$BOOTIMAGE" ] || [ ! -e "$BOOTIMAGE" ]; then
-        >&2 echo "! auto_unpatch: BOOTIMAGE not set or missing ($BOOTIMAGE)"
-        return 1
-    fi
-
     command -v flash_image >/dev/null 2>&1 || {
         >&2 echo "! auto_unpatch: flash_image function not available"
         return 2
     }
 
-    if [ ! -d "$BACKUP_DIR" ]; then
-        >&2 echo "! auto_unpatch: backup dir not found: $BACKUP_DIR"
+    verified_backup=$(select_verified_backup) || {
+        >&2 echo "! auto_unpatch: no verified backup is bound to $BOOT_TARGET"
+        >&2 echo "! Legacy/newest-by-time fallback is disabled for safety"
         return 3
-    fi
+    }
 
-    # Pick the newest backup by modification time.
-    latest_backup=$(ls -1t "$BACKUP_DIR"/boot_backup_*.img 2>/dev/null | head -n 1)
-    if [ -z "$latest_backup" ] || [ ! -f "$latest_backup" ]; then
-        >&2 echo "! auto_unpatch: no backup images in $BACKUP_DIR"
+    echo "- auto_unpatch: verified backup: $verified_backup"
+    echo "- auto_unpatch: target: $BOOT_TARGET"
+    if ! flash_image "$verified_backup" "$BOOT_TARGET"; then
+        >&2 echo "! auto_unpatch: verified flash failed"
         return 4
     fi
 
-    # ============================================================
-    # If a JSON manifest accompanies the backup, surface a one-line
-    # summary so service.sh / WebUI can show "preserved: AK3 27.0".
-    # If the manifest is missing (legacy backup) we don't fail —
-    # auto_unpatch must still work for old users.
-    # ============================================================
-    latest_manifest="${latest_backup%.img}.json"
-    if [ -f "$latest_manifest" ]; then
-        manifest_kpstate=$(grep -o '"kp_state"[[:space:]]*:[[:space:]]*"[^"]*"' "$latest_manifest" 2>/dev/null \
-            | head -n 1 | sed -E 's/.*"kp_state"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/')
-        manifest_magver=$(grep -o '"magisk_version"[[:space:]]*:[[:space:]]*"[^"]*"' "$latest_manifest" 2>/dev/null \
-            | head -n 1 | sed -E 's/.*"magisk_version"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/')
-        manifest_ksuver=$(grep -o '"ksu_version"[[:space:]]*:[[:space:]]*"[^"]*"' "$latest_manifest" 2>/dev/null \
-            | head -n 1 | sed -E 's/.*"ksu_version"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/')
-        manifest_verified=$(grep -o '"backup_verified"[[:space:]]*:[[:space:]]*[a-z]*' "$latest_manifest" 2>/dev/null \
-            | head -n 1 | sed -E 's/.*"backup_verified"[[:space:]]*:[[:space:]]*([a-z]*).*/\1/')
-        echo "- auto_unpatch: manifest kp_state=${manifest_kpstate:-unknown} magisk=${manifest_magver:-null} ksu=${manifest_ksuver:-null} verified=${manifest_verified:-unknown}"
-    else
-        echo "- auto_unpatch: no manifest for $latest_backup (legacy backup)"
-    fi
-
-    echo "- auto_unpatch: using latest backup: $latest_backup"
-
-    if ! flash_image "$latest_backup" "$BOOTIMAGE"; then
-        >&2 echo "! auto_unpatch: flash failed"
-        return 5
-    fi
-
-    # Best-effort cleanup of the counter so we don't immediately
-    # re-trigger on the next boot. Keep the marker so the WebUI
-    # can show that auto-recovery was activated.
     echo "0" > "$PNDIR/boot_count" 2>/dev/null
-    echo "- auto_unpatch: flash successful"
+    touch "$AUTORECOVERY_MARKER" 2>/dev/null || true
+    echo "- auto_unpatch: verified restore completed"
     return 0
 }
 
-[ -e "$BOOTIMAGE" ] || { echo "- $BOOTIMAGE does not exist!"; exit 1; }
+echo "- Target image: $BOOT_TARGET"
+cd "$WORKDIR" || exit 1
 
-echo "- Target image: $BOOTIMAGE"
-
-  # Check for dependencies
-command -v magiskboot >/dev/null 2>&1 || { echo "- Command magiskboot not found!"; exit 1; }
-command -v kptools >/dev/null 2>&1 || { echo "- Command kptools not found!"; exit 1; }
-
-if [ ! -f kernel ]; then
-echo "- Unpacking boot image"
-magiskboot unpack "$BOOTIMAGE" >/dev/null 2>&1
-if [ $? -ne 0 ]; then
-    >&2 echo "! Unpack error: $?"
+echo "- Unpacking current boot image into private workspace"
+if ! magiskboot unpack "$BOOT_TARGET" >/dev/null 2>&1; then
+    >&2 echo "! Unpack failed"
     exit 1
-  fi
+fi
+[ -s kernel ] || { >&2 echo "! Unpack produced no kernel; refusing to continue"; exit 1; }
+
+if ! kptools -i kernel -l 2>/dev/null | grep -q 'patched=true'; then
+    echo "- Kernel is not PatchNest-patched; no unpatch required"
+    exit 0
 fi
 
-if [ -n "$(kptools -i kernel -l 2>/dev/null | grep patched=true)" ]; then
-	echo "- kernel has been patched "
-  if [ -f "new-boot.img" ]; then
-    echo "- found backup boot.img ,use it for recovery"
-  else
-    mv kernel kernel.ori
-    echo "- Unpatching kernel"
-    kptools -u --image kernel.ori --out kernel
-    if [ $? -ne 0 ]; then
-      >&2 echo "! Unpatch error: $?"
-      exit 1
-    fi
-    echo "- Repacking boot image"
-    magiskboot repack "$BOOTIMAGE" >/dev/null 2>&1
-    if [ $? -ne 0 ]; then
-      >&2 echo "! Repack error: $?"
-      exit 1
-    fi
-  fi
-
-else
-  echo "- no need unpatch"
-  exit 0
-fi
-
-if [ -f "new-boot.img" ]; then
-  echo "- Flashing boot image"
-  flash_image new-boot.img "$BOOTIMAGE"
-
-  if [ $? -ne 0 ]; then
-    >&2 echo "! Flash error: $?"
-    save_image_to_storage "new-boot.img"
+echo "- Unpatching kernel"
+mv kernel kernel.patched
+if ! kptools -u --image kernel.patched --out kernel; then
+    >&2 echo "! Unpatch failed"
     exit 1
-  fi
+fi
+[ -s kernel ] || { >&2 echo "! Unpatch produced an empty kernel"; exit 1; }
+
+echo "- Repacking from the current target image"
+if ! magiskboot repack "$BOOT_TARGET" >/dev/null 2>&1; then
+    >&2 echo "! Repack failed"
+    exit 1
+fi
+[ -s new-boot.img ] || { >&2 echo "! Repack produced no new-boot.img"; exit 1; }
+
+echo "- Flashing unpatched boot image"
+if ! flash_image "$WORKDIR/new-boot.img" "$BOOT_TARGET"; then
+    rc=$?
+    >&2 echo "! Flash failed: $rc"
+    save_image_to_storage "$WORKDIR/new-boot.img"
+    exit 1
 fi
 
 echo "- Flash successful"
-
-# Reset any error code
-true
+exit 0
