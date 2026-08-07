@@ -35,6 +35,7 @@ def main() -> int:
     installer = read("module/install_kpm.sh")
     verifier = read("module/kpm_verify.sh")
     quarantine = read("module/manage_kpm_quarantine.sh")
+    recovery_state = read("module/patch/recovery_state.sh")
     service = read("module/service.sh")
 
     # Package installation and persistent-state boundaries.
@@ -45,6 +46,7 @@ def main() -> int:
         ("patch/boot_target.sh", "package validation omits boot-only discovery"),
         ("patch/boot_restore_verified.sh", "package validation omits verified restore"),
         ("patch/kptools_argv.sh", "package validation omits argv normalization"),
+        ("patch/recovery_state.sh", "package validation omits recovery monitoring state"),
         ("manage_kpm_quarantine.sh", "package validation omits quarantine management"),
         ("module.prop.bak", "validated module metadata backup is not created"),
         ("KPM_SIGNATURE_POLICY=strict", "new installs do not default to strict signatures"),
@@ -75,12 +77,33 @@ def main() -> int:
     ):
         require(post_fs, token, message)
 
-    # Status updates must tolerate pipe characters and resolve stale recovery state.
+    # Intentional unpatch/restore must not be counted as repeated patch failures.
+    for token, message in (
+        ('. "$MODDIR/patch/recovery_state.sh"', "post-fs does not load recovery state helpers"),
+        ("patchnest_recovery_monitoring_suspended", "post-fs ignores intentional monitoring suspension"),
+        ("recovery monitoring remains suspended", "suspended boot is not recorded"),
+        ("invalid recovery suspension state removed", "invalid suspension does not restore normal monitoring"),
+        ('"monitoring_suspended": false', "normal recovery state omits monitoring status"),
+    ):
+        require(post_fs, token, message)
+
+    for token, message in (
+        ("current-image-unpatched", "unpatch suspension reason is unsupported"),
+        ("verified-backup-restored", "restore suspension reason is unsupported"),
+        ('"monitoring_suspended": true', "suspended state is not represented"),
+        ('"required_next_step": "repatch_or_remove_module"', "suspension state lacks remediation"),
+        ("patchnest_resume_recovery_monitoring", "recovery monitoring cannot resume"),
+    ):
+        require(recovery_state, token, message)
+
+    # Status updates must tolerate pipe characters and clear suspension after a
+    # confirmed healthy kernel handshake.
     require(status, "awk -v key=", "status uses delimiter-sensitive replacement")
     reject(status, 'sed "s|^$prop=', "pipe-delimited sed update returned")
     require(status, "mark_boot_healthy", "healthy boot does not resolve recovery state")
-    require(status, '"recovery_requested": false', "healthy state does not clear recovery request")
-    require(status, '"resolution": "healthy_kpatch_hello"', "healthy state lacks a resolution")
+    require(status, '. "$MODDIR/patch/recovery_state.sh"', "healthy status does not load recovery state helper")
+    require(status, "patchnest_resume_recovery_monitoring", "healthy status does not resume monitoring")
+    require(status, "healthy-kpatch-hello", "healthy status lacks an explicit resolution")
 
     # KPM package admission: exact prebuilt artifact, bounded ZIP, verified digest.
     for token, message in (
@@ -99,7 +122,7 @@ def main() -> int:
         (".kpm-stage.$$", "installation is not staged"),
         ('mv "$STAGE_DIR/module.kpm" "$DEST_KPM"', "binary is not committed last"),
         ('ZIP_NAME="${MOD_ID}.zip"', "retained ZIP does not use its final filename"),
-        ('sha256sum "$ZIP_NAME" >"$ZIP_DIGEST_NAME"', "staged ZIP digest is not relative/final-name bound"),
+        ('sha256sum "$ZIP_NAME" >"$ZIP_DIGEST_NAME"', "staged ZIP digest is not final-name bound"),
         ('sha256sum -c "$ZIP_DIGEST_NAME"', "installed ZIP digest is not rechecked"),
         ("Installed ZIP does not match its retained digest", "final ZIP mismatch is not fatal"),
     ):
@@ -121,6 +144,8 @@ def main() -> int:
         ("sha256sum -c checksums.sha256", "digest set is not checked"),
         ("is_allowed_transaction_name", "unknown files are not rejected"),
         ("Quarantine transaction checksum verification failed", "tampering is not fatal"),
+        ("Staged quarantine transaction checksum verification failed", "copied transaction is not reverified"),
+        ("Transaction changed during activation", "activation has no TOCTOU detection"),
         ("Only quarantined .kpm transactions can be activated", "non-KPM transaction can activate"),
         ("Quarantined KPM failed kptools validation", "activation skips KPM parsing"),
         ("Quarantined KPM signature is invalid", "activation skips signature verification"),
