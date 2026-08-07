@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "matrix": "A/B physical boot lifecycle",
+  "minimumCoverage": {
+    "devices": 2,
+    "socFamilies": 2,
+    "requiredSlots": ["a", "b"]
+  },
+  "cases": [
+    {"id":"AB-01","title":"Patch active slot A and verify exact-length readback","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"AB-02","title":"Boot patched slot A and confirm healthy kpatch handshake","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"AB-03","title":"Unpatch active slot A and verify readback","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"AB-04","title":"Patch active slot B and verify exact target selection","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"AB-05","title":"Boot patched slot B and confirm healthy kpatch handshake","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"AB-06","title":"Unpatch active slot B and verify readback","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"AB-07","title":"Reject cross-slot verified-backup restore","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"AB-08","title":"Explicitly patch inactive slot without modifying active slot","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"AB-09","title":"OTA slot switch preserves target-bound backup semantics","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"AB-10","title":"Bootloader rollback from failed patched slot","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"AB-11","title":"Repeated backup creation within one second remains unique","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"AB-12","title":"Two distinct SoC families complete patch and rollback","required":true,"status":"pending","testedCommit":"","evidence":[]}
+  ]
+}

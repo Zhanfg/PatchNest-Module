@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "matrix": "Non-A/B physical boot lifecycle",
+  "minimumCoverage": {
+    "devices": 1,
+    "requiredSlots": ["none"]
+  },
+  "cases": [
+    {"id":"NA-01","title":"Discover and validate single boot partition","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"NA-02","title":"Patch single boot partition with exact readback","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"NA-03","title":"Boot patched image and confirm healthy kpatch handshake","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"NA-04","title":"Unpatch current image and verify readback","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"NA-05","title":"Restore exact verified backup and reboot","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"NA-06","title":"Reject image larger than target before write","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"NA-07","title":"Reject read-only target before dd","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"NA-08","title":"Manual recovery or bootloader rollback succeeds","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"NA-09","title":"Interrupted pre-write operation leaves boot unchanged","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"NA-10","title":"Readback mismatch is reported as failure","required":true,"status":"pending","testedCommit":"","evidence":[]}
+  ]
+}

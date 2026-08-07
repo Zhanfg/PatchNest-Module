@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "matrix": "Verified restore and failure injection",
+  "cases": [
+    {"id":"RC-01","title":"Reject empty selected backup","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"RC-02","title":"Reject missing or duplicated manifest fields","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"RC-03","title":"Reject backup_verified false","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"RC-04","title":"Reject target mismatch","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"RC-05","title":"Reject backup filename mismatch","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"RC-06","title":"Reject malformed or mismatched SHA-256","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"RC-07","title":"Reject digest-valid image that cannot unpack a kernel","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"RC-08","title":"Never auto-select newest backup","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"RC-09","title":"Validation-only restore performs no block write","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"RC-10","title":"Expired or reused restore approval is rejected","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"RC-11","title":"Readback mismatch preserves failure evidence","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"RC-12","title":"Boot-count threshold records request but does not auto-flash","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"RC-13","title":"Intentional unpatch or restore suspends failed-boot counting","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"RC-14","title":"Healthy kpatch handshake resumes monitoring","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"RC-15","title":"Recovery evidence archive hash is retained outside Actions","required":true,"status":"pending","testedCommit":"","evidence":[]}
+  ]
+}

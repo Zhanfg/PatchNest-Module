@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "matrix": "Boot target and AVB boundary cases",
+  "cases": [
+    {"id":"AV-01","title":"Resolve boot_a through by-name symlink","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"AV-02","title":"Resolve raw block node through sysfs PARTNAME boot_b","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"AV-03","title":"Reject vendor_boot and vendor_boot slot variants","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"AV-04","title":"Reject init_boot and init_boot slot variants","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"AV-05","title":"Reject unknown raw block without boot identity","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"AV-06","title":"Accept supported MediaTek kern-a or kern_a mapping","required":false,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"AV-07","title":"Record verified boot state without modifying vbmeta","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"AV-08","title":"Do not write vbmeta or chained AVB partitions","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"AV-09","title":"Compatibility probe reports blockdev option support","required":true,"status":"pending","testedCommit":"","evidence":[]},
+    {"id":"AV-10","title":"Compatibility-gate failure prevents setrw and dd","required":true,"status":"pending","testedCommit":"","evidence":[]}
+  ]
+}

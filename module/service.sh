@@ -1,247 +1,315 @@
-#!/bin/sh
+#!/system/bin/sh
+# PatchNest late-start service.
+
+set -u
+umask 077
 
 MODDIR=${0%/*}
-PNDIR="/data/adb/patchnest"
-PATH="$MODDIR/bin:$PATH"
+PNDIR=/data/adb/patchnest
+PATH="$MODDIR/bin:${PATH:-}"
 CONFIG="$PNDIR/package_config"
-# P1-fix (ultracode-audit-2026-06-06): quote $PNDIR. If the path
-# ever contains a space (custom user layout, su bind-mount trick,
-# or future Magisk layout change) the previous form would word-split
-# into two paths and `cat` would error out — masking the real
-# config. The sanitization of $REHOOK below also defends against
-# a hostile $PNDIR/rehook file (only off|enable|disable|empty
-# are accepted).
-REHOOK="$(cat "$PNDIR/rehook" 2>/dev/null || true)"
+KPN_CONFIG="$PNDIR/config"
 LOG="$PNDIR/service.log"
 KPM_DIR="$PNDIR/kpm"
 KPM_EVENT_DIR="$PNDIR/kpm_events"
+KPM_QUARANTINE_DIR="$PNDIR/kpm_quarantine"
+KPM_FAILED_DIR="$PNDIR/kpm_failed"
+UNSIGNED_LOG="$PNDIR/unsigned_modules.log"
 
-# Helper: read a key from module.prop
-get_prop() {
-    grep "^${1}=" "$2" 2>/dev/null | head -1 | cut -d'=' -f2-
+mkdir -p "$PNDIR" "$KPM_DIR" "$KPM_EVENT_DIR" "$KPM_QUARANTINE_DIR" "$KPM_FAILED_DIR"
+chmod 0700 "$PNDIR" "$KPM_DIR" "$KPM_EVENT_DIR" "$KPM_QUARANTINE_DIR" "$KPM_FAILED_DIR" 2>/dev/null || true
+printf '=== %s service.sh started ===\n' "$(date)" >"$LOG"
+: >"$UNSIGNED_LOG"
+chmod 0600 "$LOG" "$UNSIGNED_LOG" 2>/dev/null || true
+
+service_log() {
+    printf '[%s] %s\n' "$(date)" "$*" >>"$LOG" 2>/dev/null || true
 }
 
-# Read the global PatchNest config file. This is a simple KEY=VALUE
-# file; we only look at the keys we care about and treat anything else
-# as future work. The file may not exist on first-run / legacy installs;
-# defaults below are chosen to preserve pre-signature behavior.
-#
-# KPM_SIGNATURE_POLICY controls how unsigned / unverified KPM modules
-# are handled at boot. Three modes:
-#
-#   off    — Never check signatures. Unsigned modules load silently.
-#            This is the default; preserves pre-v0.3.0 behavior.
-#   warn   — Load unsigned modules but emit a visible warning to the
-#            service log and to the WebUI. Recommended for users who
-#            want to develop / embed their own KPMs without giving up
-#            the safety net of seeing which ones are unsigned.
-#   strict — Refuse to load any KPM that is not accompanied by a valid
-#            .kpm.sig file. Strictest; use only after all your KPMs
-#            are signed.
-#
-# The policy can be set in /data/adb/patchnest/config, e.g.:
-#     KPM_SIGNATURE_POLICY=warn
-# or toggled from the WebUI Settings page.
-KPN_CONFIG="$PNDIR/config"
-KPM_SIGNATURE_POLICY=off
-if [ -f "$KPN_CONFIG" ]; then
-    # Tolerate comments, blank lines, and `export ` prefixes.
-    _val=$(grep -E '^[[:space:]]*(export[[:space:]]+)?KPM_SIGNATURE_POLICY[[:space:]]*=' \
-        "$KPN_CONFIG" 2>/dev/null | tail -1 | sed -E 's/^[^=]*=//' | tr -d '"\r\n' | tr 'A-Z' 'a-z')
-    case "$_val" in
-        off|warn|strict) KPM_SIGNATURE_POLICY="$_val" ;;
-        0|false)         KPM_SIGNATURE_POLICY=off ;;
-        1|true|yes|on)   KPM_SIGNATURE_POLICY=strict ;;
-        *)               KPM_SIGNATURE_POLICY=off ;;
+# Parse exactly one normalized policy line. post-fs-data.sh repairs missing,
+# duplicate, or malformed policy before this service runs; strict remains the
+# fail-closed fallback if that preparation was skipped or interrupted.
+KPM_SIGNATURE_POLICY=strict
+_policy_count=0
+_policy_value=""
+if [ -f "$KPN_CONFIG" ] && [ ! -L "$KPN_CONFIG" ]; then
+    _policy_count=$(grep -c '^KPM_SIGNATURE_POLICY=' "$KPN_CONFIG" 2>/dev/null || true)
+    _policy_value=$(sed -n 's/^KPM_SIGNATURE_POLICY=//p' "$KPN_CONFIG" 2>/dev/null | head -n 1 | tr -d ' \t\r\n')
+fi
+if [ "$_policy_count" = "1" ]; then
+    case "$_policy_value" in
+        off|warn|strict) KPM_SIGNATURE_POLICY=$_policy_value ;;
+        *) service_log "invalid signature policy observed; using strict" ;;
     esac
+else
+    service_log "missing or duplicate signature policy observed; using strict"
 fi
 
-# Map the policy to the legacy boolean expected by the existing logic,
-# and expose a third state.  All actual decisions are made on the
-# string policy below; the boolean is kept for logging only.
-case "$KPM_SIGNATURE_POLICY" in
-    off)    REQUIRE_KPM_SIGNATURES=0 ;;
-    warn|strict) REQUIRE_KPM_SIGNATURES=1 ;;
-    *)      REQUIRE_KPM_SIGNATURES=0 ;;
+# Only allow the documented rehook values.
+REHOOK=$(cat "$PNDIR/rehook" 2>/dev/null || true)
+REHOOK=$(printf '%s' "$REHOOK" | tr -d '\000-\037\177' | head -c 16)
+case "$REHOOK" in
+    enable|disable|'') ;;
+    *)
+        service_log "invalid rehook request removed"
+        rm -f "$PNDIR/rehook" 2>/dev/null || true
+        REHOOK=""
+        ;;
 esac
 
-# Source the KPM signature verifier. It is a no-op cost when
-# KPM_SIGNATURE_POLICY=off (we never call it below). The verifier
-# exposes `verify_kpm_sig <kpm> <sig>` which returns 0/1.
-# shellcheck disable=SC1091
-. "$MODDIR/kpm_verify.sh" 2>/dev/null || true
+service_log "MODDIR=$MODDIR"
+service_log "KPM_SIGNATURE_POLICY=$KPM_SIGNATURE_POLICY"
 
-# Rotate log on boot
-mkdir -p "$PNDIR" "$KPM_DIR/failed" "$KPM_EVENT_DIR"
-echo "=== $(date) service.sh started ===" > "$LOG"
-echo "[$(date)] MODDIR=$MODDIR" >> "$LOG"
-echo "[$(date)] PATH=$PATH" >> "$LOG"
-echo "[$(date)] KPM_SIGNATURE_POLICY=$KPM_SIGNATURE_POLICY" >> "$LOG"
-
-# Detect root manager
-ROOT_MGR="unknown"
-if [ -f "$PNDIR/root_manager" ]; then
-    # P1-fix (ultracode-audit-2026-06-06): quote $PNDIR in the cat
-    # call, and sanitize the value to a safe character class. The
-    # /data/adb/patchnest/root_manager file is written by customize.sh
-    # (only 'apatch'|'ksu'|'magisk'|'unknown' values), but if a
-    # future installer writes a tampered value here, an unquoted
-    # expansion could break later `case` statements. The whitelist
-    # sanitization prevents the value from containing shell
-    # metacharacters that could affect any downstream use.
-    _rm_raw="$(cat "$PNDIR/root_manager" 2>/dev/null || true)"
-    _rm_sane="$(printf '%s' "$_rm_raw" | tr -cd 'a-z')"
-    if [ -n "$_rm_sane" ]; then
-        ROOT_MGR="$_rm_sane"
-    fi
+# Load shared helpers. Missing transactional storage or signature verification
+# must never degrade into ad-hoc file moves or unsigned loading.
+TRANSACTION_READY=false
+if [ -f "$MODDIR/kpm_transaction_store.sh" ] && [ ! -L "$MODDIR/kpm_transaction_store.sh" ]; then
+    # shellcheck disable=SC1091
+    . "$MODDIR/kpm_transaction_store.sh"
+    command -v patchnest_store_kpm_transaction >/dev/null 2>&1 && TRANSACTION_READY=true
 fi
-echo "[$(date)] root_manager=$ROOT_MGR" >> "$LOG"
 
-# Check if kpatch binary exists and is executable
+SIGNATURE_READY=false
+if [ -f "$MODDIR/kpm_verify.sh" ] && [ ! -L "$MODDIR/kpm_verify.sh" ]; then
+    # shellcheck disable=SC1091
+    . "$MODDIR/kpm_verify.sh"
+    command -v verify_kpm_sig >/dev/null 2>&1 && SIGNATURE_READY=true
+fi
+
+store_transaction() {
+    _source=$1
+    _root=$2
+    _reason=$3
+    if [ "$TRANSACTION_READY" != "true" ]; then
+        service_log "ERROR: transaction store unavailable; left in place: $(basename "$_source") reason=$_reason"
+        return 1
+    fi
+    _entry=$(patchnest_store_kpm_transaction "$_source" "$_root" "$_reason" 2>/dev/null) || {
+        service_log "ERROR: transaction store failed; left in place: $(basename "$_source") reason=$_reason"
+        return 1
+    }
+    service_log "stored KPM transaction entry=$_entry reason=$_reason"
+    return 0
+}
+
+# Detect root manager from the installer-owned, normalized state file.
+ROOT_MGR=unknown
+if [ -f "$PNDIR/root_manager" ] && [ ! -L "$PNDIR/root_manager" ]; then
+    _rm_sane=$(tr -cd 'a-z' <"$PNDIR/root_manager" 2>/dev/null | head -c 16)
+    case "$_rm_sane" in apatch|ksu|magisk|unknown) ROOT_MGR=$_rm_sane ;; esac
+fi
+service_log "root_manager=$ROOT_MGR"
+
 if [ ! -x "$MODDIR/bin/kpatch" ]; then
-    echo "[$(date)] ERROR: kpatch binary not found or not executable" >> "$LOG"
+    service_log "ERROR: kpatch binary not found or not executable"
     touch "$MODDIR/unresolved"
     exit 0
 fi
 
-# Retry kpatch hello (P1-Cluster D: increase retries 3->5 for slow devices,
-# and require both 'hello' exit code 0 AND non-empty output, to avoid
-# treating a stuck kernel as "ready".)
+# Retry the kernel handshake on slow devices, then stop without altering KPM
+# persistence if the kernel is intentionally or unexpectedly unpatched.
 retries=0
 max_retries=5
-while [ $retries -lt $max_retries ]; do
+while [ "$retries" -lt "$max_retries" ]; do
     if kpatch hello >/dev/null 2>&1; then
         break
     fi
-    echo "[$(date)] kpatch hello attempt $((retries + 1)) failed, retrying..." >> "$LOG"
-    sleep 2
     retries=$((retries + 1))
+    service_log "kpatch hello attempt $retries failed"
+    sleep 2
 done
 if ! kpatch hello >/dev/null 2>&1; then
-    echo "[$(date)] kpatch hello failed after $retries retries" >> "$LOG"
-    echo "[$(date)] Kernel may not be patched yet. Open WebUI and click Start." >> "$LOG"
+    service_log "kpatch hello failed after $retries retries"
     touch "$MODDIR/unresolved"
     exit 0
 fi
-echo "[$(date)] kpatch hello OK" >> "$LOG"
+rm -f "$MODDIR/unresolved" 2>/dev/null || true
+service_log "kpatch hello OK"
 
-# Bootloop Auto-Recovery: healthy boot detected — reset the counter
-# and clear any auto-recovery markers so we don't trigger unpatch.
-echo "0" > "$PNDIR/boot_count" 2>/dev/null
-rm -f "$PNDIR/autorecovery_active" "$PNDIR/auto_unpatch_requested"
+# A confirmed healthy PatchNest kernel resumes failed-boot monitoring after an
+# intentional unpatch or verified restore.
+if [ -f "$MODDIR/patch/recovery_state.sh" ]; then
+    # shellcheck disable=SC1091
+    . "$MODDIR/patch/recovery_state.sh"
+    patchnest_resume_recovery_monitoring healthy-kpatch-hello \
+        || service_log "WARNING: could not resume recovery monitoring"
+else
+    printf '%s\n' 0 >"$PNDIR/boot_count" 2>/dev/null || true
+    rm -f "$PNDIR/autorecovery_active" "$PNDIR/auto_unpatch_requested" 2>/dev/null || true
+fi
 
-# Safe KPM load
-# Use a literal-glob test: when the directory is empty, the shell returns
-# the pattern itself unchanged. The [ -e ] check then correctly skips it,
-# avoiding the bug where the old [ -s ] guard would test the wrong path.
-for kpm in "$KPM_DIR"/*.kpm "$KPM_DIR"/*.ko "$KPM_DIR"/*.o; do
+# Any Linux object that appears after post-fs admission remains invalid. Store
+# it as a complete failure transaction rather than letting kpatch parse it.
+for _object in "$KPM_DIR"/*.ko "$KPM_DIR"/*.o; do
+    [ -e "$_object" ] || continue
+    [ -f "$_object" ] && [ ! -L "$_object" ] || {
+        service_log "ERROR: unsafe non-KPM object left untouched: $_object"
+        continue
+    }
+    store_transaction "$_object" "$KPM_FAILED_DIR" non-kpm-object || true
+done
+
+for kpm in "$KPM_DIR"/*.kpm; do
     [ -e "$kpm" ] || continue
-    [ -s "$kpm" ] || continue
-    mod_basename=$(basename "$kpm" | sed 's/\.\(kpm\|ko\|o\)$//')
-    args=""
-    if [ -f "$KPM_EVENT_DIR/${mod_basename}.args" ]; then
-        # P0-8 security fix: the .args file lives under KPM_EVENT_DIR and is
-        # writable by anything running as root. Restrict to a safe character
-        # class so that a stray shell metacharacter cannot become an extra
-        # argument to `kpatch kpm load`.
-        raw_args="$(cat "$KPM_EVENT_DIR/${mod_basename}.args" 2>/dev/null || true)"
-        args="$(printf '%s' "$raw_args" | tr -cd 'A-Za-z0-9_=,.+:/@% -')"
+    [ -f "$kpm" ] && [ ! -L "$kpm" ] && [ -s "$kpm" ] || {
+        service_log "ERROR: unsafe or empty KPM left untouched: $kpm"
+        continue
+    }
+
+    mod_basename=$(basename "$kpm" .kpm)
+    case "$mod_basename" in
+        ''|.|..|*[!A-Za-z0-9_.-]*)
+            service_log "ERROR: unsafe KPM basename left untouched: $mod_basename"
+            continue
+            ;;
+    esac
+
+    # Only an explicit autoload marker authorizes boot-time loading. If a KPM
+    # arrived after post-fs admission, preserve it in quarantine transaction.
+    if [ ! -f "$KPM_EVENT_DIR/${mod_basename}.autoload" ] \
+        || [ -L "$KPM_EVENT_DIR/${mod_basename}.autoload" ]; then
+        store_transaction "$kpm" "$KPM_QUARANTINE_DIR" autoload-disabled || true
+        continue
     fi
 
-    # --- KPM signature verification (policy-controlled) --------------------
-    # off   → skip all checks, log nothing.
-    # warn  → allow unsigned, but log + flag for the WebUI.
-    # strict → reject unsigned / invalid.
+    args=""
+    if [ -e "$KPM_EVENT_DIR/${mod_basename}.args" ]; then
+        if [ ! -f "$KPM_EVENT_DIR/${mod_basename}.args" ] \
+            || [ -L "$KPM_EVENT_DIR/${mod_basename}.args" ]; then
+            service_log "ERROR: unsafe args sidecar; quarantining $mod_basename"
+            store_transaction "$kpm" "$KPM_FAILED_DIR" load-failed || true
+            continue
+        fi
+        _args_size=$(wc -c <"$KPM_EVENT_DIR/${mod_basename}.args" 2>/dev/null || true)
+        case "$_args_size" in ''|*[!0-9]*) _args_size=999999 ;; esac
+        if [ "$_args_size" -gt 1024 ] \
+            || LC_ALL=C grep -q '[[:cntrl:]]' "$KPM_EVENT_DIR/${mod_basename}.args" 2>/dev/null; then
+            service_log "ERROR: invalid args sidecar; quarantining $mod_basename"
+            store_transaction "$kpm" "$KPM_FAILED_DIR" load-failed || true
+            continue
+        fi
+        args=$(cat "$KPM_EVENT_DIR/${mod_basename}.args" 2>/dev/null || true)
+    fi
+
     _kpm_sig="$KPM_DIR/${mod_basename}.kpm.sig"
-    if [ "$KPM_SIGNATURE_POLICY" != "off" ]; then
-        if [ ! -f "$_kpm_sig" ]; then
-            # No .kpm.sig file present.
-            if [ "$KPM_SIGNATURE_POLICY" = "strict" ]; then
-                echo "[$(date)] REJECTED (strict, unsigned): $(basename "$kpm"), moving to failed/" >> "$LOG"
-                mv "$kpm" "$KPM_DIR/failed/$(basename "$kpm")"
-                continue
-            else
-                # warn mode — allow but flag it
-                echo "[$(date)] WARN (unsigned, policy=$KPM_SIGNATURE_POLICY): $(basename "$kpm") — loading anyway" >> "$LOG"
-                # Write a marker file so the WebUI can surface the warning.
-                echo "unsigned:$(basename "$kpm"):$(date +%s)" >> "$PNDIR/unsigned_modules.log"
-            fi
+    if [ "$KPM_SIGNATURE_POLICY" = "strict" ]; then
+        if [ ! -f "$_kpm_sig" ] || [ -L "$_kpm_sig" ]; then
+            service_log "REJECTED strict unsigned: ${mod_basename}.kpm"
+            store_transaction "$kpm" "$KPM_FAILED_DIR" unsigned-strict || true
+            continue
+        fi
+        if [ "$SIGNATURE_READY" != "true" ]; then
+            service_log "ERROR: signature verifier unavailable; leaving signed KPM for retry: $mod_basename"
+            continue
+        fi
+        if ! verify_kpm_sig "$kpm" "$_kpm_sig"; then
+            service_log "REJECTED invalid signature: ${mod_basename}.kpm"
+            store_transaction "$kpm" "$KPM_FAILED_DIR" invalid-signature || true
+            continue
+        fi
+    elif [ "$KPM_SIGNATURE_POLICY" = "warn" ]; then
+        if [ ! -f "$_kpm_sig" ] || [ -L "$_kpm_sig" ]; then
+            service_log "WARN unsigned: ${mod_basename}.kpm"
+            printf 'unsigned:%s:%s\n' "${mod_basename}.kpm" "$(date +%s)" >>"$UNSIGNED_LOG"
+        elif [ "$SIGNATURE_READY" != "true" ]; then
+            service_log "ERROR: signature verifier unavailable; leaving KPM for retry: $mod_basename"
+            continue
         elif ! verify_kpm_sig "$kpm" "$_kpm_sig"; then
-            echo "[$(date)] REJECTED (sig invalid): $(basename "$kpm"), moving to failed/" >> "$LOG"
-            mv "$kpm" "$KPM_DIR/failed/$(basename "$kpm")"
-            mv "$_kpm_sig" "$KPM_DIR/failed/$(basename "$_kpm_sig")" 2>/dev/null || true
+            service_log "REJECTED invalid signature: ${mod_basename}.kpm"
+            store_transaction "$kpm" "$KPM_FAILED_DIR" invalid-signature || true
             continue
         fi
     fi
 
-    if ! kpatch kpm load "$kpm" -- "$args"; then
-        echo "[$(date)] Failed to load: $(basename "$kpm"), moving to failed/" >> "$LOG"
-        mv "$kpm" "$KPM_DIR/failed/$(basename "$kpm")"
+    if [ -n "$args" ]; then
+        kpatch kpm load "$kpm" -- "$args"
     else
-        echo "[$(date)] Loaded: $(basename "$kpm") args=[$args]" >> "$LOG"
+        kpatch kpm load "$kpm"
+    fi
+    if [ "$?" -ne 0 ]; then
+        service_log "KPM load failed: ${mod_basename}.kpm"
+        store_transaction "$kpm" "$KPM_FAILED_DIR" load-failed || true
+    else
+        service_log "Loaded: ${mod_basename}.kpm"
     fi
 done
 
-# Rehook
 if [ -n "$REHOOK" ]; then
-    if [ "$REHOOK" = "enable" ] || [ "$REHOOK" = "disable" ]; then
-        kpatch rehook "$REHOOK"
-        echo "[$(date)] rehook $REHOOK" >> "$LOG"
+    if kpatch rehook "$REHOOK" >/dev/null 2>&1; then
+        service_log "rehook $REHOOK"
     else
-        rm -f "$PNDIR/rehook"
+        service_log "WARNING: rehook $REHOOK failed"
     fi
 fi
 
-# Dispatch events
+# Event names are fixed constants, not user input.
 dispatch_event() {
-    echo "[$(date)] Dispatching event: $1" >> "$LOG"
-    kpatch event "$1" "" "" 2>/dev/null
+    service_log "Dispatching event: $1"
+    kpatch event "$1" "" "" >/dev/null 2>&1 \
+        || service_log "WARNING: event dispatch failed: $1"
 }
 
-dispatch_event "POST_FS_DATA"
+dispatch_event POST_FS_DATA
 
-# Wait for boot completion (with 5 min timeout to avoid infinite loop on broken ROMs)
 wait_count=0
-until [ "$(getprop sys.boot_completed)" = "1" ]; do
+while [ "$(getprop sys.boot_completed 2>/dev/null)" != "1" ]; do
     sleep 1
     wait_count=$((wait_count + 1))
     if [ "$wait_count" -ge 300 ]; then
-        echo "[$(date)] WARN: boot_completed timeout, continuing anyway" >> "$LOG"
+        service_log "WARNING: boot_completed timeout"
         break
     fi
 done
 
-dispatch_event "BOOT_COMPLETED"
+dispatch_event BOOT_COMPLETED
 
-# Apply exclusion config
-# Use a temp file (not subshell pipeline) so we keep state and can quote safely.
-if [ -f "$CONFIG" ]; then
-    excluded_count=0
-    excluded_failed=0
-    # Read into a here-doc, then parse with a manual CSV reader that respects quoting.
-    _cfg_tmp=$(mktemp /data/local/tmp/patchnest_cfg.XXXXXX)
-    tail -n +2 "$CONFIG" > "$_cfg_tmp"
-    while IFS= read -r line; do
-        [ -z "$line" ] && continue
-        # Parse CSV: pkg,exclude,allow,uid (no quoted fields supported in our writer,
-        # but be defensive against embedded spaces by using a regex split).
-        pkg=$(echo "$line" | awk -F, '{print $1}')
-        exclude=$(echo "$line" | awk -F, '{print $2}')
-        uid=$(echo "$line" | awk -F, '{print $4}')
-        if [ "$exclude" = "1" ] && [ -n "$pkg" ] && [ -n "$uid" ]; then
-            # /data/system/packages.list: "<pkg> <uid>"
-            pkgq=$(printf '%s' "$pkg" | sed 's/[][\.*^$()+?{|/]/\\&/g')
-            UID_VAL=$(grep -F " $uid" /data/system/packages.list 2>/dev/null | grep "^$pkgq " | head -1 | awk '{print $2}')
-            if [ -n "$UID_VAL" ]; then
-                kpatch exclude_set "$UID_VAL" 1
+# Apply the bounded CSV exclusion configuration. Package and UID values are
+# compared as awk data rather than interpolated into regular expressions.
+if [ -f "$CONFIG" ] && [ ! -L "$CONFIG" ]; then
+    _config_size=$(wc -c <"$CONFIG" 2>/dev/null || true)
+    case "$_config_size" in ''|*[!0-9]*) _config_size=99999999 ;; esac
+    if [ "$_config_size" -le 1048576 ]; then
+        excluded_count=0
+        excluded_failed=0
+        _line_count=0
+        while IFS=, read -r pkg exclude allow uid extra; do
+            _line_count=$((_line_count + 1))
+            [ "$_line_count" -eq 1 ] && continue
+            [ "$_line_count" -le 10000 ] || {
+                service_log "WARNING: exclusion config exceeds 10000 lines"
+                break
+            }
+            [ -z "${extra:-}" ] || {
+                excluded_failed=$((excluded_failed + 1))
+                continue
+            }
+            case "$pkg" in
+                ''|*[!A-Za-z0-9_.]*)
+                    excluded_failed=$((excluded_failed + 1))
+                    continue
+                    ;;
+            esac
+            case "$uid" in
+                ''|*[!0-9]*)
+                    excluded_failed=$((excluded_failed + 1))
+                    continue
+                    ;;
+            esac
+            [ "$exclude" = "1" ] || continue
+            UID_VAL=$(awk -v package="$pkg" -v wanted_uid="$uid" \
+                '$1 == package && $2 == wanted_uid { print $2; exit }' \
+                /data/system/packages.list 2>/dev/null)
+            if [ "$UID_VAL" = "$uid" ] && kpatch exclude_set "$uid" 1 >/dev/null 2>&1; then
                 excluded_count=$((excluded_count + 1))
             else
                 excluded_failed=$((excluded_failed + 1))
             fi
-        fi
-    done < "$_cfg_tmp"
-    rm -f "$_cfg_tmp"
-    echo "[$(date)] exclusion: applied=$excluded_count failed=$excluded_failed" >> "$LOG"
+        done <"$CONFIG"
+        service_log "exclusion applied=$excluded_count failed=$excluded_failed"
+    else
+        service_log "WARNING: exclusion config exceeds 1 MiB and was ignored"
+    fi
 fi
 
-echo "[$(date)] service.sh completed" >> "$LOG"
+service_log "service.sh completed"
+exit 0
