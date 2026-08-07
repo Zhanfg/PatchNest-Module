@@ -41,6 +41,8 @@ def main() -> int:
     extract = read("module/patch/boot_extract.sh")
     post_fs = read("module/post-fs-data.sh")
     collector = read("scripts/collect_device_evidence.sh")
+    unpatch_ui = read("webui/page/boot_unpatch.js")
+    unpatch_model = read("webui/page/boot-unpatch-model.js")
 
     for script_name, script in {
         "boot_patch.sh": patch,
@@ -60,8 +62,8 @@ def main() -> int:
 
     require(guard, "PARTNAME=", "partition validation does not inspect sysfs PARTNAME")
     require(guard, "verify_block_image_prefix", "readback verification helper missing")
-    require(guard, "blockdev --getsize64", "target size check missing")
-    require(guard, "blockdev --getro", "read-only check missing")
+    require(guard, "blockdev --getsize64", "target capacity is not checked")
+    require(guard, "blockdev --getro", "target read-only state is not checked")
     require(guard, "Flash readback verification failed", "readback mismatch is not surfaced")
     require(guard, "Character-device boot flashing is not verified and is disabled", "unverified NAND writes are not fail-closed")
     require(guard, "Saved image SHA256", "saved image copy is not digest-verified")
@@ -96,6 +98,31 @@ def main() -> int:
     require(unpatch, "Flash successful and verified", "unpatch does not require readback verification")
     reject(unpatch, "found backup boot.img", "stale new-boot.img recovery branch remains")
     reject(unpatch, "if ! flash_image", "negated flash command can hide the original error code")
+
+    # A WebUI module-load failure must not silently authorize a boot write.
+    # The script boundary requires a one-time approval even if index.js falls
+    # through to patchModule.patch("unpatch").
+    require(unpatch, "require_flash_approval", "block-device unpatch has no approval gate")
+    require(unpatch, "APPROVAL_MAX_AGE=120", "unpatch approval has no short expiry")
+    require(unpatch, "PATCHNEST_UNPATCH_APPROVED", "explicit CLI approval path is missing")
+    require(unpatch, "operation=current-image-unpatch", "approval is not operation-bound")
+    require(unpatch, "Unpatch approval expired or has a future timestamp", "approval timestamp is not validated")
+    require(unpatch, "rm -f \"$APPROVAL_FILE\" ||", "one-time approval is not consumed before work")
+    require(unpatch, "require_flash_approval || exit 1", "approval failure does not stop the write path")
+    approval_pos = unpatch.find("require_flash_approval || exit 1")
+    unpack_pos = unpatch.find('magiskboot unpack "$BOOTIMAGE"')
+    if approval_pos < 0 or unpack_pos < 0 or approval_pos > unpack_pos:
+        raise AssertionError("unpatch approval is checked after boot-image processing starts")
+
+    require(unpatch_ui, "createUnpatchApproval", "WebUI confirmation does not create one-time approval")
+    require(unpatch_ui, "clearUnpatchApproval", "WebUI does not clear stale/cancelled approvals")
+    require(unpatch_ui, "return false", "missing confirmation UI is not fail-closed")
+    reject(unpatch_ui, "readLatestBackupInfo", "current-image unpatch UI still reads a backup plan")
+    require(unpatch_model, "usesStoredBackup: false", "UI model still claims a stored backup is used")
+    require(unpatch_model, "flashesStoredBackup: false", "UI model still claims a stored backup is flashed")
+    require(unpatch_model, "preservesStoredBackups: true", "UI model does not preserve backup state")
+    require(unpatch_model, "does not restore or flash any stored backup", "English copy does not state the backup boundary")
+    require(unpatch_model, "不会选择、恢复或刷入任何已保存备份", "Chinese copy does not state the backup boundary")
 
     require(post_fs, '"automatic_flash_performed": false', "early-boot state incorrectly claims a restore occurred")
     require(post_fs, '"required_next_step": "select_target_bound_verified_backup"', "recovery request lacks its required verification step")
