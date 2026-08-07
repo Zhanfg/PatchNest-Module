@@ -11,6 +11,8 @@ AUTORECOVERY_MARKER="$PNDIR/autorecovery_active"
 
 # shellcheck disable=SC1091
 . "$MODPATH/util_functions.sh"
+# shellcheck disable=SC1091
+. "$MODPATH/flash_safety.sh"
 
 BOOTIMAGE=${1:-}
 [ -n "$BOOTIMAGE" ] || { >&2 echo "! BOOTIMAGE is required"; exit 1; }
