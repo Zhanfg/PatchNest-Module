@@ -20,8 +20,21 @@ fi
 ui_print "- Root manager: $ROOT_MGR"
 ui_print "- Architecture: $ARCH"
 
+# Validate every runtime dependency before persistent state is changed. This
+# list intentionally includes helpers that are sourced later; a missing helper
+# must abort installation rather than fail only during a boot-image operation.
 for _required_file in \
     module.prop \
+    action.sh \
+    compile_kpm.sh \
+    detect_env.sh \
+    install_kpm.sh \
+    kpm_verify.sh \
+    manage_kpm_quarantine.sh \
+    post-fs-data.sh \
+    service.sh \
+    status.sh \
+    uninstall.sh \
     bin/kpatch \
     bin/kptools \
     bin/kpimg \
@@ -31,6 +44,7 @@ for _required_file in \
     patch/boot_unpatch.sh \
     patch/flash_guard.sh \
     patch/boot_target.sh \
+    patch/kptools_argv.sh \
     patch/util_functions.sh \
     webroot/index.html \
     webroot/index.js; do
@@ -54,7 +68,8 @@ set_perm_recursive "$MODPATH/bin" 0 2000 0755 0755
 set_perm_recursive "$MODPATH/patch" 0 0 0755 0755
 for _script in \
     action.sh customize.sh detect_env.sh install_kpm.sh kpm_verify.sh \
-    post-fs-data.sh service.sh status.sh uninstall.sh compile_kpm.sh; do
+    manage_kpm_quarantine.sh post-fs-data.sh service.sh status.sh \
+    uninstall.sh compile_kpm.sh; do
     [ -f "$MODPATH/$_script" ] && set_perm "$MODPATH/$_script" 0 0 0755
 done
 
