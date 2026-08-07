@@ -45,9 +45,7 @@ fail() {
 
 safe_entry_id() {
   _value=$1
-  case "$_value" in
-    ''|*[!A-Za-z0-9_.-]*|.|..) return 1 ;;
-  esac
+  case "$_value" in ''|*[!A-Za-z0-9_.-]*|.|..) return 1 ;; esac
   [ "${#_value}" -le 128 ] || return 1
   printf '%s' "$_value"
 }
@@ -74,9 +72,7 @@ resolve_entry() {
 
 is_allowed_transaction_name() {
   case "$1" in
-    manifest.properties|checksums.sha256|state|module.kpm|module.ko|module.o|module.kpm.sig|events|args|autoload)
-      return 0
-      ;;
+    manifest.properties|checksums.sha256|state|module.kpm|module.ko|module.o|module.kpm.sig|events|args|autoload) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -94,19 +90,41 @@ verify_entry_checksums() {
     [ -f "$_path" ] && [ ! -L "$_path" ] || return 1
     _name=$(basename "$_path")
     is_allowed_transaction_name "$_name" || return 1
-    case "$_name" in
-      checksums.sha256|state) continue ;;
-    esac
+    case "$_name" in checksums.sha256|state) continue ;; esac
     [ "$(grep -Ec "^[0-9a-f]{64}  ${_name}$" "$_checksums" 2>/dev/null || true)" = "1" ] || return 1
   done
 
-  # Every checksum entry must reference one of the fixed canonical file names.
   while IFS= read -r _line; do
     printf '%s\n' "$_line" | grep -Eq '^[0-9a-f]{64}  (manifest\.properties|module\.kpm|module\.ko|module\.o|module\.kpm\.sig|events|args|autoload)$' \
       || return 1
   done <"$_checksums"
 
   (cd "$_entry" && sha256sum -c checksums.sha256 >/dev/null 2>&1)
+}
+
+validate_optional_sidecar() {
+  _path=$1
+  _max_size=$2
+  [ -e "$_path" ] || return 0
+  [ -f "$_path" ] && [ ! -L "$_path" ] || return 1
+  _size=$(wc -c <"$_path" 2>/dev/null || true)
+  case "$_size" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$_size" -le "$_max_size" ]
+}
+
+validate_event_sidecar() {
+  _path=$1
+  validate_optional_sidecar "$_path" 512 || return 1
+  [ -e "$_path" ] || return 0
+  _clean=$(tr -cd 'A-Za-z0-9_,.\r\n-' <"$_path" 2>/dev/null)
+  [ "$_clean" = "$(cat "$_path" 2>/dev/null)" ]
+}
+
+validate_args_sidecar() {
+  _path=$1
+  validate_optional_sidecar "$_path" 1024 || return 1
+  [ -e "$_path" ] || return 0
+  ! LC_ALL=C grep -q '[[:cntrl:]]' "$_path" 2>/dev/null
 }
 
 list_entries() {
@@ -136,11 +154,7 @@ list_entries() {
 
 inspect_entry() {
   _entry=$(resolve_entry "$1") || fail "Invalid or incomplete quarantine entry: $1"
-  if verify_entry_checksums "$_entry"; then
-    echo "integrity=ok"
-  else
-    echo "integrity=failed"
-  fi
+  if verify_entry_checksums "$_entry"; then echo "integrity=ok"; else echo "integrity=failed"; fi
   cat "$_entry/manifest.properties"
   echo "files:"
   for _file in "$_entry"/*; do
@@ -151,35 +165,41 @@ inspect_entry() {
   done
 }
 
-validate_optional_sidecar() {
-  _path=$1
-  _max_size=$2
-  [ -e "$_path" ] || return 0
-  [ -f "$_path" ] && [ ! -L "$_path" ] || return 1
-  _size=$(wc -c <"$_path" 2>/dev/null || true)
-  case "$_size" in ''|*[!0-9]*) return 1 ;; esac
-  [ "$_size" -le "$_max_size" ]
-}
-
 activate_entry() {
-  _entry=$(resolve_entry "$1") || fail "Invalid or incomplete quarantine entry: $1"
-  verify_entry_checksums "$_entry" || fail "Quarantine transaction checksum verification failed"
+  _original=$(resolve_entry "$1") || fail "Invalid or incomplete quarantine entry: $1"
+  verify_entry_checksums "$_original" || fail "Quarantine transaction checksum verification failed"
 
-  _manifest="$_entry/manifest.properties"
+  mkdir "$LOCK_DIR" 2>/dev/null || fail "Another quarantine operation is already running"
+  _stage="$PNDIR/.quarantine-activate.$$"
+  cleanup() {
+    rm -rf "$_stage" 2>/dev/null || true
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+  }
+  trap cleanup EXIT INT TERM HUP
+  mkdir "$_stage" || fail "Cannot create activation staging directory"
+  chmod 0700 "$_stage" 2>/dev/null || true
+
+  # Copy the complete transaction, then verify the copied snapshot. This closes
+  # the gap between the first integrity check and the files actually activated.
+  for _source in "$_original"/*; do
+    [ -f "$_source" ] && [ ! -L "$_source" ] || fail "Transaction changed during activation"
+    cp "$_source" "$_stage/$(basename "$_source")" || fail "Cannot snapshot quarantine transaction"
+  done
+  verify_entry_checksums "$_stage" || fail "Staged quarantine transaction checksum verification failed"
+
+  _manifest="$_stage/manifest.properties"
   _module_id=$(read_field "$_manifest" module_id 2>/dev/null) || fail "Entry has no unique module_id"
-  case "$_module_id" in
-    ''|*[!A-Za-z0-9_.-]*|.|..) fail "Entry has unsafe module_id" ;;
-  esac
+  case "$_module_id" in ''|*[!A-Za-z0-9_.-]*|.|..) fail "Entry has unsafe module_id" ;; esac
   [ "${#_module_id}" -le 64 ] || fail "Entry module_id is too long"
   [ "$(read_field "$_manifest" primary 2>/dev/null)" = "module.kpm" ] \
     || fail "Only quarantined .kpm transactions can be activated"
 
-  _kpm="$_entry/module.kpm"
-  _sig="$_entry/module.kpm.sig"
+  _kpm="$_stage/module.kpm"
+  _sig="$_stage/module.kpm.sig"
   [ -s "$_kpm" ] && [ ! -L "$_kpm" ] || fail "Quarantine entry has no valid module.kpm"
   [ -s "$_sig" ] && [ ! -L "$_sig" ] || fail "Activation requires module.kpm.sig"
-  validate_optional_sidecar "$_entry/events" 1024 || fail "Event sidecar is invalid or too large"
-  validate_optional_sidecar "$_entry/args" 4096 || fail "Argument sidecar is invalid or too large"
+  validate_event_sidecar "$_stage/events" || fail "Event sidecar is invalid or too large"
+  validate_args_sidecar "$_stage/args" || fail "Argument sidecar is invalid or too large"
 
   command -v kptools >/dev/null 2>&1 || fail "kptools is unavailable"
   kptools -l -M "$_kpm" >/dev/null 2>&1 || fail "Quarantined KPM failed kptools validation"
@@ -189,14 +209,6 @@ activate_entry() {
   . "$MODDIR/kpm_verify.sh"
   verify_kpm_sig "$_kpm" "$_sig" || fail "Quarantined KPM signature is invalid"
 
-  mkdir "$LOCK_DIR" 2>/dev/null || fail "Another quarantine operation is already running"
-  _stage="$PNDIR/.quarantine-activate.$$"
-  cleanup() {
-    rm -rf "$_stage" 2>/dev/null || true
-    rmdir "$LOCK_DIR" 2>/dev/null || true
-  }
-  trap cleanup EXIT INT TERM HUP
-
   [ ! -e "$KPM_DIR/${_module_id}.kpm" ] || fail "Live KPM already exists: $_module_id"
   [ ! -e "$KPM_DIR/${_module_id}.kpm.sig" ] || fail "Live signature already exists: $_module_id"
   [ ! -e "$EVENT_DIR/${_module_id}.events" ] || fail "Live event config already exists: $_module_id"
@@ -204,18 +216,6 @@ activate_entry() {
   [ ! -e "$EVENT_DIR/${_module_id}.autoload" ] || fail "Live autoload marker already exists: $_module_id"
 
   mkdir -p "$KPM_DIR" "$EVENT_DIR" || fail "Cannot create live KPM directories"
-  mkdir "$_stage" || fail "Cannot create activation staging directory"
-  chmod 0700 "$_stage" 2>/dev/null || true
-  cp "$_kpm" "$_stage/module.kpm" || fail "Cannot stage KPM"
-  cp "$_sig" "$_stage/module.kpm.sig" || fail "Cannot stage signature"
-  [ ! -f "$_entry/events" ] || cp "$_entry/events" "$_stage/events" || fail "Cannot stage events"
-  [ ! -f "$_entry/args" ] || cp "$_entry/args" "$_stage/args" || fail "Cannot stage arguments"
-  chmod 0600 "$_stage"/* 2>/dev/null || true
-
-  kptools -l -M "$_stage/module.kpm" >/dev/null 2>&1 || fail "Staged KPM failed validation"
-  verify_kpm_sig "$_stage/module.kpm" "$_stage/module.kpm.sig" \
-    || fail "Staged KPM signature failed validation"
-
   rollback=false
   mv "$_stage/module.kpm.sig" "$KPM_DIR/${_module_id}.kpm.sig" || rollback=true
   if [ "$rollback" = "false" ] && [ -f "$_stage/events" ]; then
@@ -242,7 +242,7 @@ activate_entry() {
     fail "Activation commit failed and was rolled back"
   fi
 
-  if ! rm -rf "$_entry"; then
+  if ! rm -rf "$_original"; then
     log "WARNING: activated module but could not remove transaction entry=$1"
     echo "! Activated KPM, but the old quarantine transaction could not be removed" >&2
   fi
@@ -264,11 +264,6 @@ case "${1:-}" in
     [ "$#" -eq 2 ] || { usage >&2; exit 2; }
     activate_entry "$2"
     ;;
-  -h|--help|help|'')
-    usage
-    ;;
-  *)
-    usage >&2
-    exit 2
-    ;;
+  -h|--help|help|'') usage ;;
+  *) usage >&2; exit 2 ;;
 esac
