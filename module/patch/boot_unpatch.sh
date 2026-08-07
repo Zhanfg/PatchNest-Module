@@ -24,6 +24,7 @@ FLASH_TO_DEVICE=${2:-true}
 
 . "$MODPATH/util_functions.sh"
 . "$MODPATH/flash_guard.sh"
+. "$MODPATH/recovery_state.sh"
 
 validate_boot_image() {
   _image=$1
@@ -175,7 +176,10 @@ if ! validate_boot_image new-boot.img; then
   save_image_to_storage new-boot.img
   exit 1
 fi
+_unpatched_sha=$(image_stream_sha256 new-boot.img 2>/dev/null || true)
+_target_name=$(partition_name_for_target "$BOOTIMAGE")
 
+echo "- Unpatched image SHA256: ${_unpatched_sha:-unavailable}"
 if [ "$FLASH_TO_DEVICE" = "true" ]; then
   echo "- Flashing generated current-image replacement"
   flash_image new-boot.img "$BOOTIMAGE"
@@ -184,6 +188,11 @@ if [ "$FLASH_TO_DEVICE" = "true" ]; then
     echo "! Flash or readback verification error: $flash_rc" >&2
     save_image_to_storage new-boot.img
     exit 1
+  fi
+  if patchnest_suspend_recovery_monitoring current-image-unpatched "$_target_name" "$_unpatched_sha"; then
+    echo "- Recovery monitoring suspended until PatchNest is installed again"
+  else
+    echo "! Current boot image was unpatched, but recovery monitoring state could not be suspended" >&2
   fi
   echo "- Current boot image unpatched and read back successfully"
 else
