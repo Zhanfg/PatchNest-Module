@@ -38,6 +38,7 @@ def main() -> int:
     target = read("module/patch/boot_target.sh")
     patch = read("module/patch/boot_patch.sh")
     unpatch = read("module/patch/boot_unpatch.sh")
+    restore = read("module/patch/boot_restore_verified.sh")
     extract = read("module/patch/boot_extract.sh")
     post_fs = read("module/post-fs-data.sh")
     collector = read("scripts/collect_device_evidence.sh")
@@ -47,6 +48,7 @@ def main() -> int:
     for script_name, script in {
         "boot_patch.sh": patch,
         "boot_unpatch.sh": unpatch,
+        "boot_restore_verified.sh": restore,
         "boot_extract.sh": extract,
     }.items():
         require(script, '. "$MODPATH/flash_guard.sh"', f"{script_name} does not source flash_guard.sh")
@@ -85,18 +87,20 @@ def main() -> int:
     reject(patch, "set -x", "boot patcher enables shell tracing and may expose a superkey")
     reject(patch, "(proceeding)", "unverified embedded KPMs still proceed")
 
+    # Current-image unpatch is not a backup restore operation.
     require(unpatch, "FLASH_TO_DEVICE=${2:-true}", "unpatch lacks an explicit file-only mode")
-    require(unpatch, "Successfully unpatched; image saved without flashing", "file-only unpatch does not preserve a verified output")
+    require(unpatch, "Successfully unpatched current image; output saved without flashing", "file-only unpatch does not preserve a verified output")
     require(unpatch, "rm -f kernel kernel.ori new-boot.img", "stale work artifacts are not removed")
-    require(unpatch, "select_verified_backup", "verified backup selection helper missing")
-    require(unpatch, "partition_name_for_target", "recovery target comparison does not use the logical partition name")
-    require(unpatch, "backup_sha256", "recovery does not enforce backup digest")
-    require(unpatch, "backup_verified", "recovery does not enforce verification state")
     require(unpatch, 'readlink -f "$_image"', "unpatch validation does not use an absolute path")
     require(unpatch, "Generated kernel still reports patched=true", "unpatch output state is not checked")
     require(unpatch, "Unpatched boot image validation failed", "repacked unpatch image is not independently validated")
-    require(unpatch, "Flash successful and verified", "unpatch does not require readback verification")
-    reject(unpatch, "found backup boot.img", "stale new-boot.img recovery branch remains")
+    require(unpatch, "Current boot image unpatched and read back successfully", "current-image unpatch does not require readback success")
+    reject(unpatch, "BACKUP_DIR", "current-image unpatch still references the backup directory")
+    reject(unpatch, "select_verified_backup", "current-image unpatch still auto-selects a backup")
+    reject(unpatch, "auto_unpatch", "current-image unpatch still contains a backup-restore primitive")
+    reject(unpatch, "backup_sha256", "current-image unpatch still parses backup integrity metadata")
+    reject(unpatch, "backup_verified", "current-image unpatch still parses backup verification metadata")
+    reject(unpatch, "ls -1t", "current-image unpatch still selects the newest backup")
     reject(unpatch, "if ! flash_image", "negated flash command can hide the original error code")
 
     # A WebUI module-load failure must not silently authorize a boot write.
@@ -123,6 +127,28 @@ def main() -> int:
     require(unpatch_model, "preservesStoredBackups: true", "UI model does not preserve backup state")
     require(unpatch_model, "does not restore or flash any stored backup", "English copy does not state the backup boundary")
     require(unpatch_model, "不会选择、恢复或刷入任何已保存备份", "Chinese copy does not state the backup boundary")
+
+    # Backup restoration is an explicit, exact-input operation. Validation is
+    # the default; a write requires a separate CLI approval.
+    require(restore, "FLASH_TO_DEVICE=${3:-false}", "restore does not default to validation-only mode")
+    require(restore, '"$_backup_root"/boot_backup_*.img', "restore accepts backups outside the controlled directory")
+    require(restore, "backup_verified", "restore does not require a verified manifest")
+    require(restore, "boot_image", "restore does not bind the backup to a target partition")
+    require(restore, "backup_file", "restore does not bind the manifest to the selected image")
+    require(restore, "backup_sha256", "restore does not require the recorded digest")
+    require(restore, "Backup target mismatch", "restore does not fail on a target mismatch")
+    require(restore, "Selected backup SHA-256 does not match its manifest", "restore does not fail on a digest mismatch")
+    require(restore, "validate_boot_image", "restore does not independently unpack the selected backup")
+    require(restore, "PATCHNEST_RESTORE_APPROVED", "restore write lacks a separate explicit approval")
+    require(restore, "Validation complete; no block device was written", "restore validation mode is not clearly non-writing")
+    require(restore, "Verified backup restored and read back successfully", "restore write does not require readback success")
+    require(restore, "No automatic backup selection was used", "restore does not state exact-input selection")
+    reject(restore, "ls -1t", "restore auto-selects the newest backup")
+    reject(restore, "latest backup", "restore contains newest/latest backup selection language")
+    restore_approval_pos = restore.find("PATCHNEST_RESTORE_APPROVED")
+    restore_flash_pos = restore.find('flash_image "$_backup_real" "$BOOTIMAGE"')
+    if restore_approval_pos < 0 or restore_flash_pos < 0 or restore_approval_pos > restore_flash_pos:
+        raise AssertionError("restore approval is checked after the block write starts")
 
     require(post_fs, '"automatic_flash_performed": false', "early-boot state incorrectly claims a restore occurred")
     require(post_fs, '"required_next_step": "select_target_bound_verified_backup"', "recovery request lacks its required verification step")
