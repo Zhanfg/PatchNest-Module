@@ -46,6 +46,7 @@ for _required_file in \
     patch/flash_guard.sh \
     patch/boot_target.sh \
     patch/kptools_argv.sh \
+    patch/recovery_state.sh \
     patch/util_functions.sh \
     webroot/index.html \
     webroot/index.js; do
