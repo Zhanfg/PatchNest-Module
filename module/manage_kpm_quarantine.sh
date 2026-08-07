@@ -20,7 +20,7 @@ KPM_DIR="$PNDIR/kpm"
 EVENT_DIR="$PNDIR/kpm_events"
 LOG="$PNDIR/kpm_admission.log"
 LOCK_DIR="$PNDIR/.quarantine-manager.lock"
-PATH="$MODDIR/bin:/system/bin:$PATH"
+PATH="$MODDIR/bin:/system/bin:${PATH:-}"
 
 usage() {
   cat <<'EOF'
@@ -29,7 +29,8 @@ Usage:
   manage_kpm_quarantine.sh inspect <entry-id>
   manage_kpm_quarantine.sh activate <entry-id>
 
-activate requires a valid KPM signature and refuses to overwrite live files.
+activate requires a valid transaction checksum set and KPM signature, and
+refuses to overwrite live files.
 EOF
 }
 
@@ -65,31 +66,81 @@ resolve_entry() {
   [ -d "$_entry" ] && [ ! -L "$_entry" ] || return 1
   _manifest="$_entry/manifest.properties"
   [ -f "$_manifest" ] && [ ! -L "$_manifest" ] || return 1
+  [ "$(cat "$_entry/state" 2>/dev/null)" = "state=complete" ] || return 1
   [ "$(read_field "$_manifest" state 2>/dev/null)" = "complete" ] || return 1
   [ "$(read_field "$_manifest" entry_id 2>/dev/null)" = "$_requested" ] || return 1
   printf '%s' "$_entry"
 }
 
+is_allowed_transaction_name() {
+  case "$1" in
+    manifest.properties|checksums.sha256|state|module.kpm|module.ko|module.o|module.kpm.sig|events|args|autoload)
+      return 0
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+verify_entry_checksums() {
+  _entry=$1
+  _checksums="$_entry/checksums.sha256"
+  [ -f "$_checksums" ] && [ ! -L "$_checksums" ] || return 1
+  _checksum_size=$(wc -c <"$_checksums" 2>/dev/null || true)
+  case "$_checksum_size" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$_checksum_size" -le 4096 ] || return 1
+
+  for _path in "$_entry"/*; do
+    [ -e "$_path" ] || continue
+    [ -f "$_path" ] && [ ! -L "$_path" ] || return 1
+    _name=$(basename "$_path")
+    is_allowed_transaction_name "$_name" || return 1
+    case "$_name" in
+      checksums.sha256|state) continue ;;
+    esac
+    [ "$(grep -Ec "^[0-9a-f]{64}  ${_name}$" "$_checksums" 2>/dev/null || true)" = "1" ] || return 1
+  done
+
+  # Every checksum entry must reference one of the fixed canonical file names.
+  while IFS= read -r _line; do
+    printf '%s\n' "$_line" | grep -Eq '^[0-9a-f]{64}  (manifest\.properties|module\.kpm|module\.ko|module\.o|module\.kpm\.sig|events|args|autoload)$' \
+      || return 1
+  done <"$_checksums"
+
+  (cd "$_entry" && sha256sum -c checksums.sha256 >/dev/null 2>&1)
+}
+
 list_entries() {
-  printf 'entry_id\tmodule_id\treason\tcreated_at\tsigned\n'
+  printf 'entry_id\tmodule_id\treason\tcreated_at\tsigned\tintegrity\n'
   [ -d "$QUARANTINE_DIR" ] || return 0
   for _entry in "$QUARANTINE_DIR"/*; do
     [ -d "$_entry" ] && [ ! -L "$_entry" ] || continue
+    _path_id=$(basename "$_entry")
     _manifest="$_entry/manifest.properties"
-    [ -f "$_manifest" ] && [ ! -L "$_manifest" ] || continue
-    [ "$(read_field "$_manifest" state 2>/dev/null)" = "complete" ] || continue
+    if ! resolve_entry "$_path_id" >/dev/null 2>&1; then
+      printf '%s\t-\tincomplete\t-\t-\tfailed\n' "$_path_id"
+      continue
+    fi
+    if ! verify_entry_checksums "$_entry"; then
+      printf '%s\t-\tintegrity-failed\t-\t-\tfailed\n' "$_path_id"
+      continue
+    fi
     _entry_id=$(read_field "$_manifest" entry_id 2>/dev/null || true)
     _module_id=$(read_field "$_manifest" module_id 2>/dev/null || true)
     _reason=$(read_field "$_manifest" reason 2>/dev/null || true)
     _created_at=$(read_field "$_manifest" created_at 2>/dev/null || true)
     _signed=no
     [ -s "$_entry/module.kpm.sig" ] && _signed=yes
-    printf '%s\t%s\t%s\t%s\t%s\n' "$_entry_id" "$_module_id" "$_reason" "$_created_at" "$_signed"
+    printf '%s\t%s\t%s\t%s\t%s\tok\n' "$_entry_id" "$_module_id" "$_reason" "$_created_at" "$_signed"
   done
 }
 
 inspect_entry() {
   _entry=$(resolve_entry "$1") || fail "Invalid or incomplete quarantine entry: $1"
+  if verify_entry_checksums "$_entry"; then
+    echo "integrity=ok"
+  else
+    echo "integrity=failed"
+  fi
   cat "$_entry/manifest.properties"
   echo "files:"
   for _file in "$_entry"/*; do
@@ -112,6 +163,8 @@ validate_optional_sidecar() {
 
 activate_entry() {
   _entry=$(resolve_entry "$1") || fail "Invalid or incomplete quarantine entry: $1"
+  verify_entry_checksums "$_entry" || fail "Quarantine transaction checksum verification failed"
+
   _manifest="$_entry/manifest.properties"
   _module_id=$(read_field "$_manifest" module_id 2>/dev/null) || fail "Entry has no unique module_id"
   case "$_module_id" in
@@ -189,7 +242,10 @@ activate_entry() {
     fail "Activation commit failed and was rolled back"
   fi
 
-  rm -rf "$_entry" || fail "Activated KPM but could not remove quarantine transaction"
+  if ! rm -rf "$_entry"; then
+    log "WARNING: activated module but could not remove transaction entry=$1"
+    echo "! Activated KPM, but the old quarantine transaction could not be removed" >&2
+  fi
   log "activated signed transaction entry=$1 module=$_module_id"
   echo "- Activated signed KPM: $_module_id"
   echo "- Reboot to load it through the normal admission path"
