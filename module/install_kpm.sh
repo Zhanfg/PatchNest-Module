@@ -15,9 +15,22 @@ PATH="$MODDIR/bin:${PATH:-}"
 ZIP_FILE=${1:-}
 TMPDIR=""
 STAGE_DIR=""
+PREVIOUS_DIR=""
 LOCK_DIR="$PNDIR/.kpm-install.lock"
 MAX_ZIP_BYTES=$((64 * 1024 * 1024))
 MAX_EXTRACTED_BYTES=$((32 * 1024 * 1024))
+COMMIT_STARTED=false
+COMMIT_WRITING=false
+COMMIT_COMPLETE=false
+HAD_EXISTING=false
+DEST_KPM=""
+DEST_SIG=""
+DEST_ZIP=""
+DEST_ZIP_DIGEST=""
+DEST_PROP=""
+DEST_EVENTS=""
+DEST_ARGS=""
+DEST_AUTOLOAD=""
 
 log() {
     mkdir -p "$PNDIR" 2>/dev/null || true
@@ -30,7 +43,45 @@ fail() {
     exit 1
 }
 
+restore_previous_file() {
+    _previous=$1
+    _destination=$2
+    [ -e "$_previous" ] || return 0
+    rm -f "$_destination" 2>/dev/null || true
+    mv "$_previous" "$_destination" 2>/dev/null || return 1
+}
+
+rollback_install() {
+    [ "$COMMIT_STARTED" = "true" ] || return 0
+    [ "$COMMIT_COMPLETE" = "false" ] || return 0
+    [ -n "$PREVIOUS_DIR" ] && [ -d "$PREVIOUS_DIR" ] || return 0
+
+    if [ "$COMMIT_WRITING" = "true" ]; then
+        rm -f \
+            "$DEST_KPM" "$DEST_SIG" "$DEST_ZIP" "$DEST_ZIP_DIGEST" \
+            "$DEST_PROP" "$DEST_EVENTS" "$DEST_ARGS" "$DEST_AUTOLOAD" \
+            2>/dev/null || true
+    fi
+
+    _rollback_failed=false
+    restore_previous_file "$PREVIOUS_DIR/kpm" "$DEST_KPM" || _rollback_failed=true
+    restore_previous_file "$PREVIOUS_DIR/sig" "$DEST_SIG" || _rollback_failed=true
+    restore_previous_file "$PREVIOUS_DIR/zip" "$DEST_ZIP" || _rollback_failed=true
+    restore_previous_file "$PREVIOUS_DIR/zip-digest" "$DEST_ZIP_DIGEST" || _rollback_failed=true
+    restore_previous_file "$PREVIOUS_DIR/prop" "$DEST_PROP" || _rollback_failed=true
+    restore_previous_file "$PREVIOUS_DIR/events" "$DEST_EVENTS" || _rollback_failed=true
+    restore_previous_file "$PREVIOUS_DIR/args" "$DEST_ARGS" || _rollback_failed=true
+    restore_previous_file "$PREVIOUS_DIR/autoload" "$DEST_AUTOLOAD" || _rollback_failed=true
+    if [ "$_rollback_failed" = "true" ]; then
+        printf '%s\n' "! KPM install rollback was incomplete; inspect $PREVIOUS_DIR" >&2
+        return 1
+    fi
+    log "Persistent KPM state rolled back after failed install"
+    return 0
+}
+
 cleanup() {
+    rollback_install || true
     [ -z "$TMPDIR" ] || rm -rf "$TMPDIR"
     [ -z "$STAGE_DIR" ] || rm -rf "$STAGE_DIR"
     rmdir "$LOCK_DIR" 2>/dev/null || true
@@ -110,8 +161,6 @@ preflight_zip_entries() {
         [ "${#_entry}" -le 240 ] || fail "ZIP entry name is too long"
     done <"$_list"
 
-    # Refuse declared extraction totals above the limit before writing entries.
-    # `unzip -l` rows begin with the uncompressed byte count; headers do not.
     _declared_total=$(unzip -l "$ZIP_FILE" 2>/dev/null | awk '
         $1 ~ /^[0-9]+$/ && NF >= 4 { total += $1 }
         END { printf "%.0f", total }
@@ -129,12 +178,23 @@ stage_file() {
     chmod "$_mode" "$STAGE_DIR/$_name" 2>/dev/null || true
 }
 
+move_existing_to_previous() {
+    _source=$1
+    _name=$2
+    [ -e "$_source" ] || return 0
+    [ -f "$_source" ] && [ ! -L "$_source" ] || fail "Existing KPM state is not a regular file: $_source"
+    mv "$_source" "$PREVIOUS_DIR/$_name" || fail "Cannot preserve existing KPM state: $_source"
+    HAD_EXISTING=true
+}
+
 validate_zip_source
 mkdir -p "$PNDIR" || fail "Cannot create PatchNest state directory"
 mkdir "$LOCK_DIR" 2>/dev/null || fail "Another KPM installation is already running"
 TMPDIR=$(mktemp -d /data/local/tmp/patchnest-kpm.XXXXXX) || fail "Cannot create extraction directory"
 STAGE_DIR="$PNDIR/.kpm-stage.$$"
-mkdir "$STAGE_DIR" || fail "Cannot create installation stage"
+PREVIOUS_DIR="$STAGE_DIR/previous"
+mkdir "$STAGE_DIR" "$PREVIOUS_DIR" || fail "Cannot create installation stage"
+chmod 0700 "$STAGE_DIR" "$PREVIOUS_DIR" 2>/dev/null || true
 
 preflight_zip_entries
 mkdir -p "$TMPDIR/root"
@@ -224,35 +284,54 @@ mkdir -p "$KPM_DIR" "$KPM_ZIP_DIR" "$KPM_EVENT_DIR" || fail "Cannot create KPM d
 chmod 0700 "$KPM_DIR" "$KPM_ZIP_DIR" "$KPM_EVENT_DIR" 2>/dev/null || true
 DEST_KPM="$KPM_DIR/${MOD_ID}.kpm"
 DEST_SIG="$KPM_DIR/${MOD_ID}.kpm.sig"
-rm -f "$KPM_EVENT_DIR/${MOD_ID}.autoload"
+DEST_ZIP="$KPM_ZIP_DIR/$ZIP_NAME"
+DEST_ZIP_DIGEST="$KPM_ZIP_DIR/$ZIP_DIGEST_NAME"
+DEST_PROP="$KPM_ZIP_DIR/${MOD_ID}.prop"
+DEST_EVENTS="$KPM_EVENT_DIR/${MOD_ID}.events"
+DEST_ARGS="$KPM_EVENT_DIR/${MOD_ID}.args"
+DEST_AUTOLOAD="$KPM_EVENT_DIR/${MOD_ID}.autoload"
 
-# Commit metadata first and binary last. All sources were fully prepared under
-# the same /data filesystem, so these renames do not depend on network or ZIP IO.
-mv "$STAGE_DIR/$ZIP_NAME" "$KPM_ZIP_DIR/$ZIP_NAME" || fail "Cannot install source ZIP"
-mv "$STAGE_DIR/$ZIP_DIGEST_NAME" "$KPM_ZIP_DIR/$ZIP_DIGEST_NAME" || fail "Cannot install ZIP digest"
+COMMIT_STARTED=true
+move_existing_to_previous "$DEST_KPM" kpm
+move_existing_to_previous "$DEST_SIG" sig
+move_existing_to_previous "$DEST_ZIP" zip
+move_existing_to_previous "$DEST_ZIP_DIGEST" zip-digest
+move_existing_to_previous "$DEST_PROP" prop
+move_existing_to_previous "$DEST_EVENTS" events
+move_existing_to_previous "$DEST_ARGS" args
+move_existing_to_previous "$DEST_AUTOLOAD" autoload
+COMMIT_WRITING=true
+
+mv "$STAGE_DIR/$ZIP_NAME" "$DEST_ZIP" || fail "Cannot install source ZIP"
+mv "$STAGE_DIR/$ZIP_DIGEST_NAME" "$DEST_ZIP_DIGEST" || fail "Cannot install ZIP digest"
 (
     cd "$KPM_ZIP_DIR" || exit 1
     sha256sum -c "$ZIP_DIGEST_NAME" >/dev/null 2>&1
 ) || fail "Installed ZIP does not match its retained digest"
-mv "$STAGE_DIR/module.prop" "$KPM_ZIP_DIR/${MOD_ID}.prop" || fail "Cannot install metadata"
-if [ -f "$STAGE_DIR/events" ]; then mv "$STAGE_DIR/events" "$KPM_EVENT_DIR/${MOD_ID}.events" || fail "Cannot install event config"; else rm -f "$KPM_EVENT_DIR/${MOD_ID}.events"; fi
-if [ -f "$STAGE_DIR/args" ]; then mv "$STAGE_DIR/args" "$KPM_EVENT_DIR/${MOD_ID}.args" || fail "Cannot install argument config"; else rm -f "$KPM_EVENT_DIR/${MOD_ID}.args"; fi
-if [ "$SIGNATURE_VALID" = "true" ]; then mv "$STAGE_DIR/module.kpm.sig" "$DEST_SIG" || fail "Cannot install signature"; else rm -f "$DEST_SIG"; fi
+mv "$STAGE_DIR/module.prop" "$DEST_PROP" || fail "Cannot install metadata"
+if [ -f "$STAGE_DIR/events" ]; then mv "$STAGE_DIR/events" "$DEST_EVENTS" || fail "Cannot install event config"; fi
+if [ -f "$STAGE_DIR/args" ]; then mv "$STAGE_DIR/args" "$DEST_ARGS" || fail "Cannot install argument config"; fi
+if [ "$SIGNATURE_VALID" = "true" ]; then mv "$STAGE_DIR/module.kpm.sig" "$DEST_SIG" || fail "Cannot install signature"; fi
 mv "$STAGE_DIR/module.kpm" "$DEST_KPM" || fail "Cannot install KPM binary"
 
 if [ "$MOD_AUTOLOAD" = "true" ]; then
-    if [ -n "$MOD_ARGS" ]; then
-        kpatch kpm load "$DEST_KPM" -- "$MOD_ARGS"
+    if [ "$HAD_EXISTING" = "true" ]; then
+        : >"$DEST_AUTOLOAD" || fail "Cannot create update autoload marker"
+        chmod 0600 "$DEST_AUTOLOAD" 2>/dev/null || true
+        log "Signed KPM update installed; reboot required before loading: $MOD_ID"
     else
-        kpatch kpm load "$DEST_KPM"
-    fi
-    if [ "$?" -eq 0 ]; then
-        : >"$KPM_EVENT_DIR/${MOD_ID}.autoload"
-        chmod 0600 "$KPM_EVENT_DIR/${MOD_ID}.autoload" 2>/dev/null || true
-        log "Signed KPM installed and loaded: $MOD_NAME ($MOD_ID) $MOD_VERSION"
-    else
-        log "KPM installed but immediate load failed; autoload remains disabled: $MOD_ID"
-        exit 1
+        if [ -n "$MOD_ARGS" ]; then
+            kpatch kpm load "$DEST_KPM" -- "$MOD_ARGS"
+        else
+            kpatch kpm load "$DEST_KPM"
+        fi
+        if [ "$?" -eq 0 ]; then
+            : >"$DEST_AUTOLOAD" || fail "Cannot create autoload marker"
+            chmod 0600 "$DEST_AUTOLOAD" 2>/dev/null || true
+            log "Signed KPM installed and loaded: $MOD_NAME ($MOD_ID) $MOD_VERSION"
+        else
+            fail "KPM immediate load failed; persistent state will be rolled back"
+        fi
     fi
 elif [ "$autoload_requested" = "true" ] && [ "$SIGNATURE_VALID" != "true" ]; then
     log "KPM installed but not loaded because no valid signature was supplied"
@@ -260,4 +339,5 @@ else
     log "KPM installed with autoload disabled: $MOD_NAME ($MOD_ID) $MOD_VERSION"
 fi
 
+COMMIT_COMPLETE=true
 exit 0
