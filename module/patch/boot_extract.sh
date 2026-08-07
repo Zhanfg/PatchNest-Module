@@ -9,8 +9,11 @@ ARCH=$(getprop ro.product.cpu.abi)
 
 IS_INSTALL_NEXT_SLOT=$1
 
-# Load utility functions
+# shellcheck disable=SC1091
 . "$MODPATH/util_functions.sh"
+# PatchNest fail-closed slot/partition resolution overrides.
+# shellcheck disable=SC1091
+. "$MODPATH/flash_safety.sh"
 
 if [ "$IS_INSTALL_NEXT_SLOT" = "true" ]; then
   get_next_slot
