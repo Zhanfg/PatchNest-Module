@@ -38,7 +38,6 @@ def main() -> int:
     recovery_state = read("module/patch/recovery_state.sh")
     service = read("module/service.sh")
 
-    # Package installation and persistent-state boundaries.
     reject(customize, 'rm -rf "$MODDIR/webroot"', "destructive self-copy hot update returned")
     reject(customize, 'cp -rf "$MODPATH/webroot"', "installer still recopies its active module directory")
     for token, message in (
@@ -58,7 +57,6 @@ def main() -> int:
     require(uninstall, "Verified boot backups", "uninstall does not explain retained backups")
     require(uninstall, "did not flash or unpatch", "uninstall incorrectly implies boot restoration")
 
-    # The legacy service loop is broad; post-fs-data must reduce the live set.
     require(service, '"$KPM_DIR"/*.kpm "$KPM_DIR"/*.ko "$KPM_DIR"/*.o', "service scan changed; review admission assumptions")
     for token, message in (
         ("kpm_quarantine", "non-autoload modules are not quarantined"),
@@ -77,7 +75,6 @@ def main() -> int:
     ):
         require(post_fs, token, message)
 
-    # Intentional unpatch/restore must not be counted as repeated patch failures.
     for token, message in (
         ('. "$MODDIR/patch/recovery_state.sh"', "post-fs does not load recovery state helpers"),
         ("patchnest_recovery_monitoring_suspended", "post-fs ignores intentional monitoring suspension"),
@@ -96,8 +93,6 @@ def main() -> int:
     ):
         require(recovery_state, token, message)
 
-    # Status updates must tolerate pipe characters and clear suspension after a
-    # confirmed healthy kernel handshake.
     require(status, "awk -v key=", "status uses delimiter-sensitive replacement")
     reject(status, 'sed "s|^$prop=', "pipe-delimited sed update returned")
     require(status, "mark_boot_healthy", "healthy boot does not resolve recovery state")
@@ -105,12 +100,17 @@ def main() -> int:
     require(status, "patchnest_resume_recovery_monitoring", "healthy status does not resume monitoring")
     require(status, "healthy-kpatch-hello", "healthy status lacks an explicit resolution")
 
-    # KPM package admission: exact prebuilt artifact, bounded ZIP, verified digest.
+    # ZIP and metadata admission must be bounded before extraction.
     for token, message in (
         ('"$MODDIR"/tmp/*', "WebUI upload staging path is not accepted"),
+        ("ZIP exceeds 64 MiB", "compressed ZIP size is unbounded"),
         ("unzip -Z1", "ZIP entries are not preflighted"),
+        ("ZIP contains duplicate entry", "duplicate ZIP paths are not rejected"),
+        ("Declared ZIP extraction exceeds 32 MiB", "declared extraction size is not bounded"),
         ("ZIP contains symbolic links", "symbolic links are not rejected"),
-        ("Extracted ZIP exceeds 32 MiB", "extracted-size bound is missing"),
+        ("Extracted ZIP exceeds 32 MiB", "actual extracted size is not rechecked"),
+        ("module.prop contains duplicate key", "duplicate metadata keys are accepted"),
+        ("module.prop is missing required key: id", "required module id is not enforced"),
         ("Linux .ko/.o files are not KernelPatch KPM artifacts", "Linux objects are accepted"),
         ("On-device KPM source compilation is disabled; provide one prebuilt .kpm", "source packages are not rejected"),
         ("ZIP must contain exactly one prebuilt KPM binary", "ambiguous KPM packages are accepted"),
@@ -120,13 +120,28 @@ def main() -> int:
         ('kpatch kpm load "$DEST_KPM" -- "$MOD_ARGS"', "immediate-load args are not one argv value"),
         ("Another KPM installation is already running", "concurrent installs are not serialized"),
         (".kpm-stage.$$", "installation is not staged"),
-        ('mv "$STAGE_DIR/module.kpm" "$DEST_KPM"', "binary is not committed last"),
         ('ZIP_NAME="${MOD_ID}.zip"', "retained ZIP does not use its final filename"),
         ('sha256sum "$ZIP_NAME" >"$ZIP_DIGEST_NAME"', "staged ZIP digest is not final-name bound"),
         ('sha256sum -c "$ZIP_DIGEST_NAME"', "installed ZIP digest is not rechecked"),
         ("Installed ZIP does not match its retained digest", "final ZIP mismatch is not fatal"),
     ):
         require(installer, token, message)
+
+    # Persistent updates must preserve old state and roll back partial commits.
+    for token, message in (
+        ("rollback_install", "KPM update has no rollback routine"),
+        ("COMMIT_STARTED", "KPM update has no transaction start state"),
+        ("COMMIT_WRITING", "KPM update cannot distinguish backup and write phases"),
+        ("COMMIT_COMPLETE", "KPM update has no commit completion state"),
+        ("move_existing_to_previous", "existing persistent state is not preserved"),
+        ("Persistent KPM state rolled back after failed install", "rollback is not observable"),
+        ("KPM install rollback was incomplete", "incomplete rollback is not surfaced"),
+        ("Signed KPM update installed; reboot required before loading", "updates can hot-load over an existing KPM"),
+        ("KPM immediate load failed; persistent state will be rolled back", "new-install load failure does not roll back"),
+        ('mv "$STAGE_DIR/module.kpm" "$DEST_KPM"', "binary is not committed from staging"),
+    ):
+        require(installer, token, message)
+
     for forbidden, message in (
         ('ARGS_OPT="-- $MOD_ARGS"', "unquoted argument concatenation returned"),
         ('"$MODDIR/compile_kpm.sh" "$TMPDIR/root"', "installer invokes on-device source compilation"),
@@ -135,7 +150,6 @@ def main() -> int:
     ):
         reject(installer, forbidden, message)
 
-    # Quarantine activation is recovery-oriented, signed, checksummed, and no-overwrite.
     for token, message in (
         ("list_entries", "read-only listing is missing"),
         ("inspect_entry", "read-only inspection is missing"),
@@ -160,7 +174,6 @@ def main() -> int:
     if re.search(r"(?m)^\s*delete\)", quarantine):
         raise AssertionError("quarantine manager exposes destructive delete")
 
-    # Ed25519 verifier must use RFC 8410 DER and pkeyutl raw-message verification.
     for token, message in (
         ("302a300506032b6570032100", "Ed25519 SPKI prefix is missing"),
         ("openssl pkeyutl", "pkeyutl is not used"),
