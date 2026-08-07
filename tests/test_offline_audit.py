@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Self-tests for scripts/offline_audit.py.
-
-These tests use temporary fixture repositories and require no network, root
-access, Android device, or GitHub Actions runner.
-"""
+"""Self-tests for scripts/offline_audit.py using temporary repositories."""
 
 from __future__ import annotations
 
@@ -14,7 +10,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
     "patchnest_offline_audit", ROOT / "scripts/offline_audit.py"
@@ -23,7 +18,6 @@ assert SPEC and SPEC.loader
 AUDIT = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = AUDIT
 SPEC.loader.exec_module(AUDIT)
-
 
 SAFE_UTIL = r'''#!/system/bin/sh
 find_boot_image() {
@@ -48,6 +42,7 @@ echo "Refusing to replace recovery backup with an already patched boot image"
 validate_boot_image backup.img
 '''
 
+# Compatibility fixture for the legacy combined unpatch/restore implementation.
 SAFE_UNPATCH = r'''#!/system/bin/sh
 partition_name_for_target() { echo boot_a; }
 backup_verified=true
@@ -56,8 +51,42 @@ boot_image="boot_a"
 rm -f kernel kernel.ori new-boot.img
 '''
 
+CURRENT_UNPATCH = r'''#!/system/bin/sh
+require_flash_approval() { return 0; }
+APPROVAL_MAX_AGE=120
+validate_boot_image() { magiskboot unpack "$1"; }
+patchnest_suspend_recovery_monitoring current-image-unpatched boot_a abc
+rm -f kernel kernel.ori new-boot.img
+echo "Current boot image unpatched and read back successfully"
+'''
 
-def write_fixture(root: Path, *, util: str = SAFE_UTIL, patch: str = SAFE_PATCH, unpatch: str = SAFE_UNPATCH) -> None:
+CURRENT_RESTORE = r'''#!/system/bin/sh
+backup_verified=true
+backup_sha256=abc
+backup_file=boot_backup_1.img
+partition_name_for_target() { echo boot_a; }
+PATCHNEST_RESTORE_APPROVED=1
+echo "No automatic backup selection was used"
+echo "Validation complete; no block device was written"
+patchnest_suspend_recovery_monitoring verified-backup-restored boot_a abc
+echo "Verified backup restored and read back successfully"
+'''
+
+RECOVERY_STATE = r'''#!/system/bin/sh
+current-image-unpatched
+verified-backup-restored
+patchnest_resume_recovery_monitoring() { return 0; }
+echo '"monitoring_suspended": true'
+'''
+
+
+def write_fixture(
+    root: Path,
+    *,
+    util: str = SAFE_UTIL,
+    patch: str = SAFE_PATCH,
+    unpatch: str = SAFE_UNPATCH,
+) -> None:
     (root / "module/patch").mkdir(parents=True)
     (root / "webui").mkdir(parents=True)
     (root / "module/patch/util_functions.sh").write_text(util, encoding="utf-8")
@@ -66,6 +95,18 @@ def write_fixture(root: Path, *, util: str = SAFE_UTIL, patch: str = SAFE_PATCH,
     (root / "webui/constants.js").write_text(
         "export const escapeShell = value => JSON.stringify(String(value));\n",
         encoding="utf-8",
+    )
+
+
+def add_split_recovery_fixture(root: Path, *, unpatch: str = CURRENT_UNPATCH) -> None:
+    (root / "module/patch/boot_unpatch.sh").write_text(unpatch, encoding="utf-8")
+    (root / "module/patch/boot_restore_verified.sh").write_text(CURRENT_RESTORE, encoding="utf-8")
+    (root / "module/patch/recovery_state.sh").write_text(RECOVERY_STATE, encoding="utf-8")
+    (root / "module/post-fs-data.sh").write_text(
+        "patchnest_recovery_monitoring_suspended\n", encoding="utf-8"
+    )
+    (root / "module/status.sh").write_text(
+        "patchnest_resume_recovery_monitoring\n", encoding="utf-8"
     )
 
 
@@ -79,13 +120,30 @@ class OfflineAuditTests(unittest.TestCase):
         AUDIT.check_webui_bridges(root, findings)
         return AUDIT.deduplicate(findings)
 
-    def test_safe_fixture_has_no_blocker_or_error(self):
+    def test_safe_legacy_fixture_has_no_blocker_or_error(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             write_fixture(root)
             findings = self.run_checks(root)
             severe = [item for item in findings if item.severity in {"blocker", "error"}]
             self.assertEqual([], severe)
+
+    def test_safe_split_recovery_fixture_has_no_blocker_or_error(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write_fixture(root)
+            add_split_recovery_fixture(root)
+            findings = self.run_checks(root)
+            severe = [item for item in findings if item.severity in {"blocker", "error"}]
+            self.assertEqual([], severe)
+
+    def test_backup_logic_in_current_unpatch_is_blocker(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write_fixture(root)
+            add_split_recovery_fixture(root, unpatch=CURRENT_UNPATCH + "\nbackup_verified=true\n")
+            findings = self.run_checks(root)
+            self.assertIn("UNPATCH-008", {item.check_id for item in findings})
 
     def test_vendor_boot_fallback_is_blocker(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -119,8 +177,7 @@ class OfflineAuditTests(unittest.TestCase):
             root = Path(temp)
             write_fixture(root)
             (root / "webui/view.js").write_text(
-                "target.innerHTML = `<b>${remoteName}</b>`;\n",
-                encoding="utf-8",
+                "target.innerHTML = `<b>${remoteName}</b>`;\n", encoding="utf-8"
             )
             findings = self.run_checks(root)
             self.assertIn("WEBUI-001", {item.check_id for item in findings})
@@ -130,8 +187,7 @@ class OfflineAuditTests(unittest.TestCase):
             root = Path(temp)
             write_fixture(root)
             (root / "webui/bridge.js").write_text(
-                "exec(`cat ${userPath}`);\n",
-                encoding="utf-8",
+                "exec(`cat ${userPath}`);\n", encoding="utf-8"
             )
             findings = self.run_checks(root)
             matching = [item for item in findings if item.check_id == "WEBUI-002"]
