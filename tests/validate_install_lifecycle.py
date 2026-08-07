@@ -33,6 +33,7 @@ def main() -> int:
     post_fs = read("module/post-fs-data.sh")
     status = read("module/status.sh")
     installer = read("module/install_kpm.sh")
+    transaction_store = read("module/kpm_transaction_store.sh")
     verifier = read("module/kpm_verify.sh")
     quarantine = read("module/manage_kpm_quarantine.sh")
     recovery_state = read("module/patch/recovery_state.sh")
@@ -46,6 +47,7 @@ def main() -> int:
         ("patch/boot_restore_verified.sh", "package validation omits verified restore"),
         ("patch/kptools_argv.sh", "package validation omits argv normalization"),
         ("patch/recovery_state.sh", "package validation omits recovery monitoring state"),
+        ("kpm_transaction_store.sh", "package validation omits shared KPM transactions"),
         ("manage_kpm_quarantine.sh", "package validation omits quarantine management"),
         ("module.prop.bak", "validated module metadata backup is not created"),
         ("KPM_SIGNATURE_POLICY=strict", "new installs do not default to strict signatures"),
@@ -57,24 +59,62 @@ def main() -> int:
     require(uninstall, "Verified boot backups", "uninstall does not explain retained backups")
     require(uninstall, "did not flash or unpatch", "uninstall incorrectly implies boot restoration")
 
-    require(service, '"$KPM_DIR"/*.kpm "$KPM_DIR"/*.ko "$KPM_DIR"/*.o', "service scan changed; review admission assumptions")
+    # Early admission must transactionally isolate anything not eligible for
+    # the late service loader.
     for token, message in (
         ("kpm_quarantine", "non-autoload modules are not quarantined"),
         ('"$KPM_EVENT_DIR/${_name}.autoload"', "autoload is not enforced before service"),
         ('"$KPM_DIR"/*.ko "$KPM_DIR"/*.o', "Linux objects are not rejected before service"),
-        ("move_with_sidecars", "quarantine loses sidecars"),
-        ("state=staging", "transaction has no incomplete state"),
-        ("state=complete", "transaction is never finalized"),
-        ("manifest.properties", "transaction manifest is missing"),
-        ("checksums.sha256", "transaction checksum set is missing"),
-        ("sha256sum", "transaction files are not hashed"),
-        ("_safe_source", "source names are not sanitized"),
+        ("move_with_sidecars", "early quarantine loses sidecars"),
+        ("state=staging", "early transaction has no incomplete state"),
+        ("state=complete", "early transaction is never finalized"),
+        ("manifest.properties", "early transaction manifest is missing"),
+        ("checksums.sha256", "early transaction checksum set is missing"),
+        ("sha256sum", "early transaction files are not hashed"),
+        ("_safe_source", "early transaction source names are not sanitized"),
         ("module.kpm.sig", "signature is not stored with its transaction"),
         ("autoload-disabled", "autoload quarantine reason is not recorded"),
         ("signature-policy-unavailable", "policy-failure reason is not recorded"),
     ):
         require(post_fs, token, message)
 
+    # The shared store is the only acceptable runtime failure move primitive.
+    for token, message in (
+        ("patchnest_store_kpm_transaction", "shared transaction API is missing"),
+        ("patchnest_valid_transaction_root", "transaction destinations are not constrained"),
+        ("patchnest_valid_transaction_reason", "transaction reasons are not constrained"),
+        ("unsigned-strict", "strict unsigned failures are unsupported"),
+        ("invalid-signature", "signature failures are unsupported"),
+        ("load-failed", "runtime load failures are unsupported"),
+        ("patchnest_restore_moved_sidecar", "failed transactions cannot restore sidecars"),
+        ("checksums.sha256", "shared transaction store lacks integrity metadata"),
+        ("state=complete", "shared transaction store never finalizes"),
+    ):
+        require(transaction_store, token, message)
+    reject(transaction_store, "eval ", "shared transaction store evaluates untrusted input")
+
+    # Runtime loading defaults to strict, handles only .kpm as loadable input,
+    # requires autoload, and transactionally preserves every failure.
+    for token, message in (
+        ("KPM_SIGNATURE_POLICY=strict", "service signature policy is not fail-closed"),
+        ('for _object in "$KPM_DIR"/*.ko "$KPM_DIR"/*.o', "service does not reject late Linux objects"),
+        ('for kpm in "$KPM_DIR"/*.kpm', "service does not use a KPM-only load loop"),
+        ('"$KPM_EVENT_DIR/${mod_basename}.autoload"', "service does not require autoload"),
+        ("kpm_transaction_store.sh", "service does not load the shared transaction store"),
+        ("store_transaction", "service failure storage wrapper is missing"),
+        ("unsigned-strict", "strict unsigned KPMs are not transactionally stored"),
+        ("invalid-signature", "invalid signatures are not transactionally stored"),
+        ("load-failed", "load failures are not transactionally stored"),
+        ("signature verifier unavailable; leaving signed KPM for retry", "missing verifier does not fail closed"),
+        ("Signed KPM update installed", "installer/service update boundary token is missing"),
+        ("exclusion config exceeds 1 MiB", "service exclusion input is unbounded"),
+    ):
+        require(service, token, message)
+    reject(service, '"$KPM_DIR/failed/', "service still performs legacy flat failure moves")
+    reject(service, 'mv "$kpm"', "service still moves only the primary KPM")
+    reject(service, "KPM_SIGNATURE_POLICY=off", "service defaults signature verification off")
+
+    # Intentional unpatch/restore must not be counted as repeated patch failures.
     for token, message in (
         ('. "$MODDIR/patch/recovery_state.sh"', "post-fs does not load recovery state helpers"),
         ("patchnest_recovery_monitoring_suspended", "post-fs ignores intentional monitoring suspension"),
@@ -150,6 +190,7 @@ def main() -> int:
     ):
         reject(installer, forbidden, message)
 
+    # Quarantine activation is recovery-oriented, signed, checksummed, and no-overwrite.
     for token, message in (
         ("list_entries", "read-only listing is missing"),
         ("inspect_entry", "read-only inspection is missing"),
@@ -174,6 +215,7 @@ def main() -> int:
     if re.search(r"(?m)^\s*delete\)", quarantine):
         raise AssertionError("quarantine manager exposes destructive delete")
 
+    # Ed25519 verifier must use RFC 8410 DER and pkeyutl raw-message verification.
     for token, message in (
         ("302a300506032b6570032100", "Ed25519 SPKI prefix is missing"),
         ("openssl pkeyutl", "pkeyutl is not used"),
