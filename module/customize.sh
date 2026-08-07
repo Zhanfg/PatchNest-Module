@@ -29,6 +29,7 @@ for _required_file in \
     compile_kpm.sh \
     detect_env.sh \
     install_kpm.sh \
+    kpm_transaction_store.sh \
     kpm_verify.sh \
     manage_kpm_quarantine.sh \
     post-fs-data.sh \
@@ -69,9 +70,9 @@ set_perm_recursive "$MODPATH" 0 0 0755 0644
 set_perm_recursive "$MODPATH/bin" 0 2000 0755 0755
 set_perm_recursive "$MODPATH/patch" 0 0 0755 0755
 for _script in \
-    action.sh customize.sh detect_env.sh install_kpm.sh kpm_verify.sh \
-    manage_kpm_quarantine.sh post-fs-data.sh service.sh status.sh \
-    uninstall.sh compile_kpm.sh; do
+    action.sh customize.sh detect_env.sh install_kpm.sh \
+    kpm_transaction_store.sh kpm_verify.sh manage_kpm_quarantine.sh \
+    post-fs-data.sh service.sh status.sh uninstall.sh compile_kpm.sh; do
     [ -f "$MODPATH/$_script" ] && set_perm "$MODPATH/$_script" 0 0 0755
 done
 
