@@ -73,8 +73,8 @@ safe_module_id() {
 }
 
 # Move one primary object and all of its sidecars into a single transaction
-# directory. A complete manifest is written last; management tools ignore an
-# interrupted entry that never reaches state=complete.
+# directory. The manifest and checksums are finalized before state=complete;
+# management tools ignore interrupted entries.
 move_with_sidecars() {
   _source=$1
   _destination_root=$2
@@ -83,14 +83,13 @@ move_with_sidecars() {
   _stem=${_base%.*}
   _module_id=$(safe_module_id "$_stem")
   _epoch=$(date +%s 2>/dev/null || printf '0')
-  _stamp=$(date -u +%Y%m%dT%H%M%SZ 2>/dev/null || printf 'unknown')
   _entry_id="${_module_id}-${_epoch}-$$"
   _entry="$_destination_root/$_entry_id"
 
   case "$_base" in
-    *.kpm) _primary_name=module.kpm ;;
-    *.ko) _primary_name=module.ko ;;
-    *.o) _primary_name=module.o ;;
+    *.kpm) _primary_name=module.kpm; _safe_source="${_module_id}.kpm" ;;
+    *.ko) _primary_name=module.ko; _safe_source="${_module_id}.ko" ;;
+    *.o) _primary_name=module.o; _safe_source="${_module_id}.o" ;;
     *) return 1 ;;
   esac
 
@@ -132,13 +131,31 @@ module_id=$_module_id
 reason=$_reason
 created_at=$_created_at
 primary=$_primary_name
-source_basename=$_base
+source_basename=$_safe_source
 EOF
   chmod 0600 "$_manifest_tmp" 2>/dev/null || true
   mv "$_manifest_tmp" "$_entry/manifest.properties" || {
     admission_log "quarantine manifest finalization failed for $_entry_id"
     return 1
   }
+
+  _checksums_tmp="$_entry/checksums.sha256.tmp"
+  if ! (
+    cd "$_entry" || exit 1
+    for _tracked in manifest.properties module.kpm module.ko module.o module.kpm.sig events args autoload; do
+      [ -f "$_tracked" ] || continue
+      sha256sum "$_tracked" || exit 1
+    done >"checksums.sha256.tmp"
+  ); then
+    admission_log "quarantine checksum generation failed for $_entry_id"
+    return 1
+  fi
+  chmod 0600 "$_checksums_tmp" 2>/dev/null || true
+  mv "$_checksums_tmp" "$_entry/checksums.sha256" || {
+    admission_log "quarantine checksum finalization failed for $_entry_id"
+    return 1
+  }
+
   printf '%s\n' 'state=complete' >"$_entry/state"
   admission_log "stored transaction entry=$_entry_id module=$_module_id reason=$_reason"
   return 0
