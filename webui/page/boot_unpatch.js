@@ -56,16 +56,18 @@ async function clearUnpatchApproval() {
 }
 
 async function createUnpatchApproval() {
-    const approvalDir = persistDir;
-    const tmpPath = `${APPROVAL_FILE}.tmp`;
     const command = [
         'set -eu',
         'umask 077',
-        `mkdir -p ${escapeShell(approvalDir)}`,
-        `rm -f ${escapeShell(tmpPath)}`,
-        `{ printf '%s\\n' 'operation=current-image-unpatch'; printf 'approved_at='; date +%s; } > ${escapeShell(tmpPath)}`,
-        `chmod 0600 ${escapeShell(tmpPath)}`,
-        `mv ${escapeShell(tmpPath)} ${escapeShell(APPROVAL_FILE)}`,
+        `approval_file=${escapeShell(APPROVAL_FILE)}`,
+        'approval_tmp="${approval_file}.tmp.$$"',
+        "trap 'rm -f \"$approval_tmp\"' EXIT INT TERM HUP",
+        `mkdir -p ${escapeShell(persistDir)}`,
+        'rm -f "$approval_tmp"',
+        '{ printf \'%s\\n\' \'operation=current-image-unpatch\'; printf \'approved_at=\'; date +%s; } > "$approval_tmp"',
+        'chmod 0600 "$approval_tmp"',
+        'mv "$approval_tmp" "$approval_file"',
+        'trap - EXIT INT TERM HUP',
     ].join('; ');
 
     try {
