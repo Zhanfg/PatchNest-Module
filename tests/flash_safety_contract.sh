@@ -177,7 +177,11 @@ actual=$(sha256sum "$TMP/target.img" | awk '{print $1}')
 )
 
 # Commit and inspect a real destructive rollback record. A state=written
-# transaction is mandatory before the binding can be committed.
+# transaction is mandatory before the binding can be committed. Source the
+# superkey helper in this parent shell because transaction staging depends on
+# patchnest_superkey_sha256().
+# shellcheck disable=SC1090
+. "$SUPERKEY"
 PATCHNEST_ROLLBACK_BINDING_FILE="$TMP/transaction-state/rollback_binding.json"
 PATCHNEST_PENDING_TRANSACTION_FILE="$TMP/transaction-state/transaction.pending.json"
 PATCHNEST_RECOVERY_REQUIRED_FILE="$TMP/transaction-state/flash_recovery_required"
