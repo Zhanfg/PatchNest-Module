@@ -185,7 +185,15 @@ fi
 
 commit_number=$(git rev-list --count HEAD)
 commit_hash=$(git rev-parse --short HEAD)
+package="out/PatchNest-${commit_number}-${commit_hash}.zip"
+repeat="out/PatchNest-${commit_number}-${commit_hash}.repeat.zip"
 
-cd module
-zip -r "../out/PatchNest-${commit_number}-${commit_hash}.zip" .
-cd ..
+sh scripts/package_module.sh module "$package"
+sh scripts/package_module.sh module "$repeat"
+cmp -s "$package" "$repeat" || {
+    echo "ERROR: same-tree module packaging is not byte-reproducible" >&2
+    exit 1
+}
+rm -f "$repeat"
+sha256sum "$package" > "${package}.sha256"
+echo "✓ deterministic package: $package"
