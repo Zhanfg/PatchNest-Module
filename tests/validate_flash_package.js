@@ -44,6 +44,9 @@ for (const [rel, minSize] of [
   ['service.sh', 1],
   ['post-fs-data.sh', 1],
   ['uninstall.sh', 1],
+  ['install_kpm.sh', 1],
+  ['compile_kpm.sh', 1],
+  ['kpm_verify.sh', 1],
   ['device_validation.sh', 1],
   ['arm_auto_recovery.sh', 1],
   ['verify_auto_recovery.sh', 1],
@@ -59,8 +62,6 @@ for (const [rel, minSize] of [
   ['patch/superkey_safety.sh', 1],
 ]) requireFile(rel, minSize);
 
-// The review branch must be non-installable. A dedicated candidate is allowed
-// to replace this with FR014_DEVICE_CANDIDATE, but never to omit both markers.
 const blocker = path.join(MOD, 'FLASH_REVIEW_BLOCKED');
 const candidate = path.join(MOD, 'FR014_DEVICE_CANDIDATE');
 if (!fs.existsSync(blocker) && !fs.existsSync(candidate)) {
@@ -101,11 +102,13 @@ for (const required of [
   'boot_target_sha256',
   'device_binding_sha256',
   'candidate_marker_sha256',
+  'PATCHNEST_RECOVERY_EXPORT_FILE',
+  'patchnest_fr014_recovery_export_matches',
   'patchnest_clear_fr014_preflight_receipt',
 ]) {
   if (!gate.includes(required)) fail(`FR-014 gate missing binding/control: ${required}`);
 }
-if (failed === 0) pass('FR-014 receipt binds target/device/candidate and is one-time');
+if (failed === 0) pass('FR-014 receipt binds target/device/candidate/recovery export and is one-time');
 
 const transaction = read('patch/transaction_safety.sh');
 if (!transaction.includes('patchnest_json_string rollback_backup "$PATCHNEST_PENDING_TRANSACTION_FILE"')) {
@@ -116,6 +119,31 @@ const uninstall = read('uninstall.sh');
 if (/rm\s+-rf\s+\/data\/adb\/patchnest/.test(uninstall)) {
   fail('uninstall destroys boot-critical PatchNest recovery state');
 } else pass('uninstall preserves boot-critical recovery state');
+
+const installer = read('install_kpm.sh');
+if (/unzip\s+[^\n]*-d\s+/.test(installer)) {
+  fail('KPM installer lets unzip directly materialize archive paths');
+} else pass('KPM installer materializes validated entries itself');
+if (!installer.includes('unzip -p')) fail('KPM installer lacks regular-file-only archive extraction');
+else pass('KPM installer extracts entry bytes with unzip -p');
+if (!installer.includes('7f454c460201') || !installer.includes('b700')) {
+  fail('KPM installer lacks ELF64 little-endian AArch64 admission check');
+} else pass('KPM installer enforces AArch64 ELF admission');
+if (!installer.includes('FR014_DEVICE_CANDIDATE')) fail('FR-014 candidate does not block persistent KPM installation');
+else pass('FR-014 candidate blocks persistent KPM installation');
+
+const service = read('service.sh');
+if (!service.includes('.autoload')) fail('service does not require explicit KPM autoload markers');
+else pass('service requires explicit KPM autoload markers');
+if (!service.includes('validate_runtime_kpm')) fail('service lacks second-stage KPM binary validation');
+else pass('service revalidates KPM binaries before kernel load');
+if (!service.includes('FR-014 candidate pre-patch idle')) fail('service lacks FR-014 prepatch idle state');
+else pass('service distinguishes candidate prepatch idle from patched failure');
+
+const verifier = read('kpm_verify.sh');
+if (!verifier.includes('openssl pkeyutl -verify') || !verifier.includes('302a300506032b6570032100')) {
+  fail('KPM signature verifier does not use Ed25519 SPKI/pkeyutl flow');
+} else pass('KPM signature verifier uses Ed25519 SPKI/pkeyutl flow');
 
 if (failed) {
   console.error(`release-safety package validation failed: ${failed} issue(s)`);
