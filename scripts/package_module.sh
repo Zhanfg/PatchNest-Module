@@ -18,9 +18,33 @@ case "$OUTPUT" in
     *) OUTPUT_ABS="$(pwd)/$OUTPUT" ;;
 esac
 
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+REPO_ROOT=$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)
+SAFETY_VALIDATOR="$REPO_ROOT/tests/validate_flash_package.js"
+
 command -v zip >/dev/null 2>&1 || { echo "zip is required" >&2; exit 1; }
 command -v unzip >/dev/null 2>&1 || { echo "unzip is required" >&2; exit 1; }
 command -v sort >/dev/null 2>&1 || { echo "sort is required" >&2; exit 1; }
+
+# Build assembles the Android binaries/WebUI into module/ immediately before
+# packaging. When that complete tree is present, release-safety validation is a
+# mandatory pre-ZIP gate. The source-only Flash safety workflow intentionally
+# lacks these generated binaries and continues with its shell/transaction tests.
+if [ -s "$SOURCE_DIR/bin/kpatch" ] && \
+   [ -s "$SOURCE_DIR/bin/kptools" ] && \
+   [ -s "$SOURCE_DIR/bin/kpimg" ] && \
+   [ -s "$SOURCE_DIR/bin/magiskboot" ] && \
+   [ -s "$SOURCE_DIR/webroot/index.html" ]; then
+    [ -f "$SAFETY_VALIDATOR" ] || {
+        echo "assembled module safety validator missing: $SAFETY_VALIDATOR" >&2
+        exit 1
+    }
+    command -v node >/dev/null 2>&1 || {
+        echo "node is required to validate an assembled release package" >&2
+        exit 1
+    }
+    node "$SAFETY_VALIDATOR"
+fi
 
 STAGE=$(mktemp -d)
 cleanup() { rm -rf "$STAGE"; }
