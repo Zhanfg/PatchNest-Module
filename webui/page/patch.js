@@ -104,7 +104,6 @@ async function parseBootimg() {
     if (import.meta.env.DEV) {
         document.getElementById('kernel-info').textContent = `6.18-Linux`;
         document.getElementById('kernel').classList.remove('animate-hidden');
-        // Still populate the KPM list so the dev UI matches prod behavior.
         existedExtras = [];
         renderKpmList();
         return;
@@ -133,15 +132,12 @@ async function parseBootimg() {
     if (ini.kernel) {
         kimgInfo.banner = ini.kernel.banner;
         kimgInfo.patched = ini.kernel.patched === 'true';
-        // Extra metadata fields (may be absent on older kptools builds)
         kimgInfo.security_patch = ini.kernel.security_patch || '';
         kimgInfo.os_version = ini.kernel.os_version || '';
 
-        // Kernel info card
         document.getElementById('kernel-info').textContent = kimgInfo.banner;
         document.getElementById('kernel').classList.remove('animate-hidden');
 
-        // Show security patch + OS version as a secondary detail line.
         const kernelDetails = document.getElementById('kernel-details');
         if (kernelDetails) {
             const parts = [];
@@ -150,7 +146,6 @@ async function parseBootimg() {
             kernelDetails.textContent = parts.join(' | ');
         }
 
-        // Boot image size: read the unpacked kernel file if we're in tmp.
         if (modDir) {
             try {
                 const sizeResult = await exec(`wc -c < ${modDir}/tmp/kernel.ori 2>/dev/null || wc -c < ${modDir}/tmp/kernel 2>/dev/null`, {
@@ -167,7 +162,6 @@ async function parseBootimg() {
         }
 
         if (kimgInfo.patched && ini.kpimg) {
-            // Parse extras
             existedExtras = [];
             let kpmNum = parseInt(ini.kernel.extra_num);
             if (isNaN(kpmNum) && ini.extras) {
@@ -204,19 +198,14 @@ async function extractAndParseBootimg() {
         return;
     }
 
-    // Prepare work directory
     const prepare = spawn('sh', ['-c', `mkdir -p ${modDir}/tmp && rm -rf ${modDir}/tmp/* && cp ${modDir}/bin/kpimg ${modDir}/tmp/`]);
     await new Promise((resolve, reject) => {
-        // P1-Cluster C fix: only resolve on exit code 0; reject on any
-        // non-zero exit so the patch can fail fast instead of producing
-        // a corrupt boot image when kpimg is missing.
         prepare.on('exit', (code) => {
             if (code === 0) resolve();
             else reject(new Error(`prepare failed with exit code ${code}`));
         });
     });
 
-    // get slot and device
     const result = spawn('busybox', ['sh', `${modDir}/patch/boot_extract.sh`], {
         env: { PATH: `${modDir}/bin:/data/adb/ksu/bin:/data/adb/magisk:$PATH`, ASH_STANDALONE: '1' }
     });
@@ -242,7 +231,6 @@ async function extractAndParseBootimg() {
         return;
     }
 
-    // Bootimg info card
     document.getElementById('bootimg-slot').textContent = bootSlot ? getString('info_slot', bootSlot) : '';
     document.getElementById('bootimg-device').textContent = bootDev ? getString('info_device', bootDev) : getString('info_device_unknown');
     document.getElementById('bootimg').classList.remove('animate-hidden');
@@ -336,11 +324,6 @@ async function embedKPM() {
         embedBtn.disabled = true;
         startBtn.disabled = true;
 
-        // Generate random filename.
-        // P1-Cluster A fix: Math.random() is non-cryptographic and only
-        // gives ~30 bits of entropy in 6 base36 chars. Two near-simultaneous
-        // uploads could collide. crypto.randomUUID() is a strong 122-bit
-        // source available in all modern WebViews (Chromium 92+).
         const randName = (typeof crypto !== 'undefined' && crypto.randomUUID
             ? crypto.randomUUID().replace(/-/g, '').slice(0, 12)
             : Math.random().toString(36).substring(7)
@@ -350,10 +333,6 @@ async function embedKPM() {
         try {
             await uploadFile(file, tmpPath, onProgress, signal);
         } catch (e) {
-            // P0-fix (ultracode-audit-2026-06-06): quote ${tmpPath} so a
-            // malicious filename with whitespace can't be interpreted
-            // as two separate args to `rm`. randName is built from
-            // randomUUID/crypto, but defence-in-depth: belt + braces.
             exec(`rm -f ${escapeShell(tmpPath)}`);
             throw e;
         } finally {
@@ -376,7 +355,7 @@ async function embedKPM() {
             newExtras.push({
                 type: 'KPM',
                 name: ini.kpm.name,
-                event: 'pre-kernel-init', // default
+                event: 'pre-kernel-init',
                 args: '',
                 version: ini.kpm.version,
                 license: ini.kpm.license,
@@ -404,7 +383,6 @@ function patch(type) {
         return;
     }
 
-    // Reset and show the progress card.
     if (progressCard) progressCard.classList.remove('animate-hidden');
     resetProgress();
     const progress = startProgress(type, progressContainer);
@@ -425,23 +403,22 @@ function patch(type) {
             flashToDevice.selected ? 'true' : 'false'
         );
 
-        // New kpm
+        // spawn() receives an argv array. Do not shell-quote values here:
+        // quoting would become literal KPM argument content.
         newExtras.forEach(extra => {
             args.push('-M', `${modDir}/tmp/${extra.fileName}`);
-            if (extra.args) args.push('-A', escapeShell(extra.args));
+            if (extra.args) args.push('-A', extra.args);
             if (extra.event) args.push('-V', extra.event);
             args.push('-T', 'kpm');
         });
 
-        // Embeded kpm
         existedExtras.forEach(extra => {
             args.push('-E', extra.name);
-            if (extra.args) args.push('-A', escapeShell(extra.args));
+            if (extra.args) args.push('-A', extra.args);
             if (extra.event) args.push('-V', extra.event);
             args.push('-T', 'kpm');
         });
     } else {
-        // Unpatch logic
         args.push(`${modDir}/patch/boot_unpatch.sh`, bootDev);
     }
 
@@ -471,13 +448,9 @@ function patch(type) {
             kimgInfo = { banner: '', patched: false };
             newExtras = [];
         }
-        // P1-Cluster C fix: await the cleanup so it can't race with a
-        // subsequent patch start. The previous fire-and-forget meant a
-        // second patch could begin while tmp/ was being deleted.
         try {
             await exec(`rm -rf ${modDir}/tmp`);
         } catch (_) {
-            // best-effort; if rm fails the next upload's mkdir will retry
         }
     });
 }

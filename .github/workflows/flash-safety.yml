@@ -1,0 +1,127 @@
+name: Flash safety
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'module/patch/**'
+      - 'module/service.sh'
+      - 'module/post-fs-data.sh'
+      - 'module/customize.sh'
+      - 'module/device_validation.sh'
+      - 'module/arm_auto_recovery.sh'
+      - 'module/verify_auto_recovery.sh'
+      - 'module/export_recovery_boot.sh'
+      - 'scripts/device_validation.sh'
+      - 'scripts/package_module.sh'
+      - 'version.properties'
+      - 'tests/flash_safety_contract.sh'
+      - 'tests/destructive_transaction_contract.sh'
+      - 'tests/bootloop_recovery_contract.sh'
+      - 'tests/installer_contract.sh'
+      - 'tests/recovery_export_contract.sh'
+      - 'tests/runtime_abi_contract.sh'
+      - '.github/workflows/flash-safety.yml'
+  push:
+    branches:
+      - 'review/flash-readiness-hardening'
+      - 'review/flash-readiness-final'
+    paths:
+      - 'module/patch/**'
+      - 'module/service.sh'
+      - 'module/post-fs-data.sh'
+      - 'module/customize.sh'
+      - 'module/device_validation.sh'
+      - 'module/arm_auto_recovery.sh'
+      - 'module/verify_auto_recovery.sh'
+      - 'module/export_recovery_boot.sh'
+      - 'scripts/device_validation.sh'
+      - 'scripts/package_module.sh'
+      - 'version.properties'
+      - 'tests/flash_safety_contract.sh'
+      - 'tests/destructive_transaction_contract.sh'
+      - 'tests/bootloop_recovery_contract.sh'
+      - 'tests/installer_contract.sh'
+      - 'tests/recovery_export_contract.sh'
+      - 'tests/runtime_abi_contract.sh'
+      - '.github/workflows/flash-safety.yml'
+  workflow_dispatch:
+
+jobs:
+  contract:
+    name: Transactional flash and ABI contract
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install shell validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck zip unzip
+
+      - name: Shell syntax
+        run: |
+          set -euo pipefail
+          for file in module/patch/*.sh module/service.sh module/post-fs-data.sh module/customize.sh module/device_validation.sh module/arm_auto_recovery.sh module/verify_auto_recovery.sh module/export_recovery_boot.sh scripts/device_validation.sh scripts/package_module.sh tests/flash_safety_contract.sh tests/destructive_transaction_contract.sh tests/bootloop_recovery_contract.sh tests/installer_contract.sh tests/recovery_export_contract.sh tests/runtime_abi_contract.sh; do
+            sh -n "$file"
+          done
+
+      - name: ShellCheck reviewed flash/runtime path
+        run: |
+          shellcheck -s sh -S warning \
+            --exclude=SC3043,SC2034,SC2115,SC2046,SC2319,SC2155 \
+            module/patch/boot_patch.sh \
+            module/patch/boot_extract.sh \
+            module/patch/boot_unpatch.sh \
+            module/patch/flash_safety.sh \
+            module/patch/transaction_safety.sh \
+            module/patch/transactional_flash.sh \
+            module/patch/superkey_safety.sh \
+            module/service.sh \
+            module/post-fs-data.sh \
+            module/customize.sh \
+            module/device_validation.sh \
+            module/arm_auto_recovery.sh \
+            module/verify_auto_recovery.sh \
+            module/export_recovery_boot.sh \
+            scripts/device_validation.sh \
+            scripts/package_module.sh \
+            tests/flash_safety_contract.sh \
+            tests/destructive_transaction_contract.sh \
+            tests/bootloop_recovery_contract.sh \
+            tests/installer_contract.sh \
+            tests/recovery_export_contract.sh \
+            tests/runtime_abi_contract.sh
+
+      - name: Run baseline flash contract
+        env:
+          PATCHNEST_TRANSACTION_TEST: '1'
+        run: sh tests/flash_safety_contract.sh
+
+      - name: Run destructive failure-injection contract
+        env:
+          PATCHNEST_TRANSACTION_TEST: '1'
+        run: sh tests/destructive_transaction_contract.sh
+
+      - name: Run bootloop automatic recovery contract
+        run: sh tests/bootloop_recovery_contract.sh
+
+      - name: Run cross-manager installer contract
+        run: sh tests/installer_contract.sh
+
+      - name: Run off-device recovery export contract
+        run: sudo sh tests/recovery_export_contract.sh
+
+      - name: Run runtime ABI contract
+        run: sh tests/runtime_abi_contract.sh
+
+      - name: Prove flash-safety files enter deterministic ZIP
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/patchnest-package-test
+          sh scripts/package_module.sh module /tmp/patchnest-package-test/module.zip
+          test -s /tmp/patchnest-package-test/module.zip

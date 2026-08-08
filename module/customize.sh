@@ -1,104 +1,103 @@
 #!/system/bin/sh
-MODDIR="/data/adb/modules/PatchNest"
+# PatchNest installer customization. This file is sourced by the root manager
+# after the module ZIP has already been extracted into $MODPATH.
 
-# P2-Cluster E fix: defend against an unset/empty $MODDIR which would turn
-# the rm -rf below into a recursive wipe of /. We rely on $MODPATH from
-# the Magisk install harness, falling back to the legacy $MODDIR constant
-# only when $MODPATH is empty.
-[ -z "${MODPATH:-}" ] && MODPATH="$MODDIR"
-# Sanity: refuse to run if MODPATH is empty or does not exist.
-if [ -z "$MODPATH" ] || [ ! -d "$MODPATH" ]; then
-    abort "! MODPATH is empty or missing: '$MODPATH'"
+if [ -z "${MODPATH:-}" ] || [ ! -d "$MODPATH" ]; then
+    abort "! MODPATH is empty or missing: '${MODPATH:-}'"
 fi
 
-# We only support arm64
-if [ "$ARCH" != "arm64" ]; then
+# Review packages are deliberately non-installable. This check must remain
+# before every persistent PatchNest write.
+if [ -f "$MODPATH/FLASH_REVIEW_BLOCKED" ]; then
+    ui_print "! PatchNest review build: flashing is intentionally blocked"
+    ui_print "! Physical-device flash-readiness gate is still open"
+    ui_print "! Use the isolated device-validation candidate only for FR-014"
+    abort "! FLASH_REVIEW_BLOCKED"
+fi
+
+if [ "${ARCH:-}" != "arm64" ]; then
     abort "! Only arm64 is supported"
 fi
 
-# Detect root manager
+# Production state is fixed. The alternate path is accepted only by the
+# repository's installer contract and cannot be selected accidentally in a
+# normal manager installation.
+PNDIR="/data/adb/patchnest"
+if [ "${PATCHNEST_INSTALL_TEST:-0}" = "1" ]; then
+    if [ -z "${PATCHNEST_STATE_DIR:-}" ]; then
+        abort "! PATCHNEST_STATE_DIR is required in installer-test mode"
+    fi
+    PNDIR=$PATCHNEST_STATE_DIR
+fi
+
 ROOT_MGR="unknown"
-if [ -n "$APATCH" ]; then
+if [ -n "${APATCH:-}" ]; then
     ROOT_MGR="apatch"
-elif [ -n "$KSU" ]; then
+elif [ -n "${KSU:-}" ]; then
     ROOT_MGR="ksu"
-elif [ -n "$MAGISK_VER" ]; then
+elif [ -n "${MAGISK_VER:-}" ]; then
     ROOT_MGR="magisk"
 fi
 
 ui_print "- Root manager: $ROOT_MGR"
 ui_print "- Architecture: $ARCH"
 
+# The manager already extracted the final module tree into MODPATH. Only set
+# explicit permissions; never copy the tree into a hard-coded manager path.
 set_perm_recursive "$MODPATH/bin" 0 2000 0755 0755
+set_perm_recursive "$MODPATH/patch" 0 0 0755 0755
+for _pn_tool in device_validation.sh arm_auto_recovery.sh verify_auto_recovery.sh export_recovery_boot.sh; do
+    [ ! -f "$MODPATH/$_pn_tool" ] || set_perm "$MODPATH/$_pn_tool" 0 0 0755
+done
 
-mkdir -p /data/adb/patchnest
+# Fail before creating persistent state if the extracted install tree is not a
+# complete runnable package.
+for _pn_bin in kpatch kptools magiskboot; do
+    if [ ! -x "$MODPATH/bin/$_pn_bin" ]; then
+        abort "! Required binary missing or not executable: bin/$_pn_bin"
+    fi
+done
+if [ ! -s "$MODPATH/bin/kpimg" ]; then
+    abort "! Required KernelPatch image missing or empty: bin/kpimg"
+fi
+for _pn_script in \
+    boot_patch.sh \
+    boot_extract.sh \
+    boot_unpatch.sh \
+    flash_safety.sh \
+    transaction_safety.sh \
+    transactional_flash.sh \
+    superkey_safety.sh; do
+    if [ ! -x "$MODPATH/patch/$_pn_script" ]; then
+        abort "! Required patch helper missing or not executable: patch/$_pn_script"
+    fi
+done
+for _pn_tool in device_validation.sh arm_auto_recovery.sh verify_auto_recovery.sh export_recovery_boot.sh; do
+    if [ ! -x "$MODPATH/$_pn_tool" ]; then
+        abort "! Required physical-validation tool missing or not executable: $_pn_tool"
+    fi
+done
 
-# Optional system-managed KPM repos override. If the maintainer ships
-# a file at $MODPATH/repos.json in their PatchNest build, copy it
-# to /data/adb/patchnest/repos.json — the WebUI's Kpm-Repo page will
-# read this and use it as the canonical repo list instead of the
-# built-in default. Format:
-#   [ { "url": "https://...", "name": "..." }, ... ]
-# This is the cleanest way for a PatchNest fork to ship a non-default
-# default repo (e.g. "always use Acme's Kpm-Repo instead of the
-# official one"). See https://github.com/Zhanfg/Kpm-Repo for details.
+mkdir -p "$PNDIR" || abort "! Cannot create PatchNest state directory"
+chmod 0700 "$PNDIR" 2>/dev/null || true
+
 if [ -f "$MODPATH/repos.json" ]; then
-    cp "$MODPATH/repos.json" /data/adb/patchnest/repos.json
-    ui_print "- Installed system repos.json"
+    cp "$MODPATH/repos.json" "$PNDIR/repos.json" || abort "! Cannot install repos.json"
 fi
 
-# Migrate package_config from APatch if present
-if [ -f "/data/adb/ap/package_config" ] && [ ! -f "/data/adb/patchnest/package_config" ]; then
-    cp "/data/adb/ap/package_config" /data/adb/patchnest/package_config
-    ui_print "- Migrated APatch package_config"
+if [ "$ROOT_MGR" = "apatch" ] && [ -f "/data/adb/ap/package_config" ] && [ ! -f "$PNDIR/package_config" ]; then
+    cp "/data/adb/ap/package_config" "$PNDIR/package_config" || abort "! Cannot migrate APatch package_config"
 fi
 
-# Copy binaries (single source: KernelPatch-Public)
-ui_print "- Installing KernelPatch binaries..."
+printf '%s\n' "$ROOT_MGR" > "$PNDIR/root_manager" || abort "! Cannot persist root manager identity"
+chmod 0600 "$PNDIR/root_manager" 2>/dev/null || true
 
-# P1-Cluster D fix: missing critical binaries should abort the install,
-# not silently produce a broken module.
-if [ ! -x "$MODPATH/bin/kpatch" ]; then
-    abort "! kpatch binary missing or not executable in $MODPATH/bin"
-fi
-if [ ! -x "$MODPATH/bin/kptools" ]; then
-    abort "! kptools binary missing or not executable in $MODPATH/bin"
-fi
-
-# Save root manager info
-echo "$ROOT_MGR" > /data/adb/patchnest/root_manager
-
-# backup module.prop
-cp "$MODPATH/module.prop" "$MODPATH/module.prop.bak"
-
-# Hot update webui, patch scripts and binaries
-# P2-Cluster E fix: defensive globs — if the directory is empty the
-# pattern literally matches, so we guard with set +f / null-glob
-# behaviour via noclobber on the rm side. We use a leading-/-style
-# protection by checking each path explicitly.
-rm -rf "$MODDIR/webroot"/* 2>/dev/null || true
-rm -rf "$MODDIR/bin"/*     2>/dev/null || true
-rm -rf "$MODDIR/patch"/*   2>/dev/null || true
-[ -d "$MODDIR/webroot" ] || mkdir -p "$MODDIR/webroot"
-[ -d "$MODDIR/bin" ]     || mkdir -p "$MODDIR/bin"
-[ -d "$MODDIR/patch" ]   || mkdir -p "$MODDIR/patch"
-cp -rf "$MODPATH/webroot"/* "$MODDIR/webroot/" 2>/dev/null || true
-cp -rf "$MODPATH/bin"/*     "$MODDIR/bin/"     2>/dev/null || true
-cp -rf "$MODPATH/patch"/*   "$MODDIR/patch/"   2>/dev/null || true
-
-# Copy environment detection script
-cp -f "$MODPATH/detect_env.sh" "$MODDIR/detect_env.sh" 2>/dev/null || true
-
+ui_print "- PatchNest files validated in manager-provided MODPATH"
+ui_print "- Persistent state initialized"
 ui_print "- Installation complete"
 ui_print ""
-ui_print "  Next steps:"
-ui_print "  1. Reboot your device"
-if [ "$ROOT_MGR" = "magisk" ]; then
-    ui_print "  2. Install KSUWebUIStandalone app"
-    ui_print "     (no native WebUI support in Magisk)"
-    ui_print "  3. Open WebUI via Manager → Action button"
-else
-    ui_print "  2. Open WebUI via Manager → PatchNest → Action"
-fi
-ui_print "  4. Click 'Start' to patch kernel"
-ui_print "  5. Reboot again to activate"
+ui_print "  Before the first destructive FR-014 flash:"
+ui_print "  1. Run device_validation.sh preflight"
+ui_print "  2. Run export_recovery_boot.sh with the explicit RECOVERY_EXPORT unlock"
+ui_print "  3. Copy the recovery image + manifest off-device and verify SHA-256"
+ui_print "  4. Only then start the controlled flash lifecycle"
