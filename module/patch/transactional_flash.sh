@@ -3,10 +3,23 @@
 # Requires flash_safety.sh, transaction_safety.sh and superkey_safety.sh.
 
 # Candidate-only physical validation gate. Normal review/release trees without
-# FR014_DEVICE_CANDIDATE treat this helper as a no-op.
-if [ -n "${MODPATH:-}" ] && [ -f "$MODPATH/fr014_gate.sh" ]; then
-    # shellcheck disable=SC1091
-    . "$MODPATH/fr014_gate.sh"
+# FR014_DEVICE_CANDIDATE treat this helper as a no-op. A candidate marker with a
+# missing helper is a hard failure, never an implicit bypass.
+PATCHNEST_FR014_GATE_MISSING=0
+if [ -n "${MODPATH:-}" ]; then
+    _pn_candidate_marker="$MODPATH/../FR014_DEVICE_CANDIDATE"
+    if [ -f "$_pn_candidate_marker" ]; then
+        if [ -f "$MODPATH/fr014_gate.sh" ]; then
+            # shellcheck disable=SC1091
+            . "$MODPATH/fr014_gate.sh"
+        else
+            PATCHNEST_FR014_GATE_MISSING=1
+        fi
+    elif [ -f "$MODPATH/fr014_gate.sh" ]; then
+        # Load the no-op-capable helper in normal review/release trees as well.
+        # shellcheck disable=SC1091
+        . "$MODPATH/fr014_gate.sh"
+    fi
 fi
 
 patchnest_discard_pending_key_if_new() {
@@ -41,7 +54,7 @@ patchnest_attempt_verified_rollback() {
 
 # Returns:
 #   0  write verified and pending transaction advanced to state=written
-#   9  FR-014 candidate preflight gate rejected; target untouched
+#   9  FR-014 candidate preflight gate rejected/missing; target untouched
 #   10 transaction could not be staged; target untouched
 #   11 writer rejected before target mutation; transient state removed
 #   20 writer may have touched target; verified rollback succeeded
@@ -53,11 +66,28 @@ patchnest_transactional_flash() {
     _pn_target=$2
     _pn_backup=$3
 
-    if command -v patchnest_consume_fr014_preflight_if_required >/dev/null 2>&1; then
+    if [ "${PATCHNEST_FR014_GATE_MISSING:-0}" = "1" ]; then
+        >&2 echo "! FR-014 candidate gate helper is missing"
+        patchnest_discard_pending_key_if_new
+        return 9
+    fi
+    if [ -f "${_pn_candidate_marker:-/nonexistent}" ]; then
+        if ! command -v patchnest_consume_fr014_preflight_if_required >/dev/null 2>&1; then
+            >&2 echo "! FR-014 candidate gate function is unavailable"
+            patchnest_discard_pending_key_if_new
+            return 9
+        fi
         if ! patchnest_consume_fr014_preflight_if_required "$_pn_target"; then
             patchnest_discard_pending_key_if_new
             return 9
         fi
+    elif command -v patchnest_consume_fr014_preflight_if_required >/dev/null 2>&1; then
+        # Normal branch helper explicitly returns success when candidate mode is
+        # inactive. Keeping the call here exercises one common code path.
+        patchnest_consume_fr014_preflight_if_required "$_pn_target" || {
+            patchnest_discard_pending_key_if_new
+            return 9
+        }
     fi
 
     patchnest_stage_pending_transaction "$_pn_source" "$_pn_target" "$_pn_backup" || {
