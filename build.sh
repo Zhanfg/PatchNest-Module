@@ -82,10 +82,50 @@ download_assets() {
     done
 }
 
+build_public1158_cli() {
+    local commit="$1"
+    local out="$2"
+
+    [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || {
+        echo "ERROR: invalid patchnest_public1158_commit: $commit" >&2
+        exit 1
+    }
+    [[ -n "${ANDROID_NDK_HOME:-}" ]] || {
+        echo "ERROR: ANDROID_NDK_HOME is required to build the pinned Public1158 CLI" >&2
+        exit 1
+    }
+    command -v git >/dev/null 2>&1 || { echo "ERROR: git is required" >&2; exit 1; }
+    command -v cmake >/dev/null 2>&1 || { echo "ERROR: cmake is required" >&2; exit 1; }
+    command -v ninja >/dev/null 2>&1 || { echo "ERROR: ninja is required" >&2; exit 1; }
+
+    local tmp
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' RETURN
+
+    git clone -q --filter=blob:none --no-checkout https://github.com/Zhanfg/PatchNest.git "$tmp/PatchNest"
+    git -C "$tmp/PatchNest" fetch -q --depth=1 origin "$commit"
+    git -C "$tmp/PatchNest" checkout -q --detach "$commit"
+    test "$(git -C "$tmp/PatchNest" rev-parse HEAD)" = "$commit"
+
+    cmake -S "$tmp/PatchNest" -B "$tmp/build" \
+        -G Ninja \
+        -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DANDROID_PLATFORM=android-33 \
+        -DANDROID_ABI=arm64-v8a
+    cmake --build "$tmp/build" --target kpatch-public1158 --parallel
+    test -s "$tmp/build/kpatch-public1158"
+    cp "$tmp/build/kpatch-public1158" "$out"
+    chmod 0755 "$out"
+    rm -rf "$tmp"
+    trap - RETURN
+}
+
 VERSION_KERNELPATCH=$(get_ver "kernelpatch")
 VERSION_KERNELPATCH="${VERSION_KERNELPATCH:-latest}"
 VERSION_PATCHNEST=$(get_ver "patchnest")
 VERSION_PATCHNEST="${VERSION_PATCHNEST:-latest}"
+VERSION_PATCHNEST_PUBLIC1158_COMMIT=$(get_ver "patchnest_public1158_commit")
 VERSION_MAGISKBOOT=$(get_ver "magiskboot")
 VERSION_MAGISKBOOT="${VERSION_MAGISKBOOT:-latest}"
 
@@ -96,10 +136,10 @@ if [[ ! -f "module/bin/kpimg" || ! -f "module/bin/kptools" ]]; then
     mv module/bin/kptools-android module/bin/kptools
 fi
 
-# Fetch the PatchNest user-space tool.
+# Build the userspace CLI from the exact reviewed Public1158 compatibility
+# commit. Never substitute the historical Next2026 kpatch-android asset here.
 if [[ ! -f "module/bin/kpatch" ]]; then
-    download_assets "Zhanfg/PatchNest" "$VERSION_PATCHNEST" "module/bin" "kpatch-android"
-    mv module/bin/kpatch-android module/bin/kpatch
+    build_public1158_cli "$VERSION_PATCHNEST_PUBLIC1158_COMMIT" "module/bin/kpatch"
 fi
 
 # Fetch and extract magiskboot from the pinned official Magisk APK.
