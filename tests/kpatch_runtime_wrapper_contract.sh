@@ -16,6 +16,10 @@ fail() {
 cp "$ROOT/module/kpatch_runtime_wrapper.sh" "$BIN/kpatch"
 chmod 0755 "$BIN/kpatch"
 
+# The heredoc intentionally writes literal shell expansions for the generated
+# fake executable; they must expand when that fixture runs, not while this test
+# creates it.
+# shellcheck disable=SC2016
 cat > "$BIN/kpatch.real" <<EOF
 #!/bin/sh
 printf '%s\n' "\$*" >> "$TMP/real.calls"
@@ -26,6 +30,7 @@ exit 0
 EOF
 chmod 0755 "$BIN/kpatch.real"
 
+# shellcheck disable=SC2016
 cat > "$MOD/validate_kpm_file.sh" <<EOF
 #!/bin/sh
 printf '%s\n' "\$1" >> "$TMP/validator.calls"
