@@ -135,8 +135,51 @@ validate_target_unpack() {
         rm -rf "$_pn_tmp"; fail "magiskboot cannot unpack resolved target"
     fi
     [ -s "$_pn_tmp/kernel" ] || { rm -rf "$_pn_tmp"; fail "resolved target unpack produced no kernel"; }
-    PATH="$MODDIR/bin:$PATH" "$MODDIR/bin/kptools" -i "$_pn_tmp/kernel" -l > "$EVIDENCE/kernel-info.txt" 2>&1 || true
+    if ! PATH="$MODDIR/bin:$PATH" "$MODDIR/bin/kptools" -i "$_pn_tmp/kernel" -l > "$EVIDENCE/kernel-info.txt" 2>&1; then
+        rm -rf "$_pn_tmp"; fail "kptools cannot inspect resolved target kernel"
+    fi
     rm -rf "$_pn_tmp"
+}
+
+require_clean_fr014_candidate() {
+    # Review packages remain intentionally blocked and are allowed to collect
+    # read-only diagnostics. A flashable FR-014 candidate must be explicitly
+    # marked and start from a clean pre-test state so old PatchNest artifacts
+    # cannot contaminate the lifecycle evidence.
+    [ ! -f "$MODDIR/FLASH_REVIEW_BLOCKED" ] || return 0
+    [ -f "$MODDIR/FR014_DEVICE_CANDIDATE" ] || fail "unblocked package is not an FR-014 device candidate"
+    [ ! -f "$MODDIR/unresolved" ] || fail "module is already marked unresolved"
+
+    for _pn_stale in \
+        rollback_binding.json \
+        transaction.pending.json \
+        flash_recovery_required \
+        superkey \
+        superkey.pending \
+        last_flash.json \
+        last_restore.json \
+        auto_unpatch_requested \
+        autorecovery_active \
+        auto_recovery_restored \
+        credential_recovered_pending; do
+        [ ! -e "$PNDIR/$_pn_stale" ] || fail "stale PatchNest state blocks clean FR-014 preflight: $_pn_stale"
+    done
+
+    if [ -f "$PNDIR/boot_count" ]; then
+        _pn_boot_count=$(tr -cd '0-9' < "$PNDIR/boot_count" 2>/dev/null | head -c 6)
+        [ -z "$_pn_boot_count" ] || [ "$_pn_boot_count" -eq 0 ] 2>/dev/null \
+            || fail "non-zero historical boot_count blocks clean FR-014 preflight"
+    fi
+
+    _pn_old_kpm=''
+    if [ -d "$PNDIR/kpm" ]; then
+        _pn_old_kpm=$(find "$PNDIR/kpm" -maxdepth 1 -type f \( -name '*.kpm' -o -name '*.ko' -o -name '*.o' \) -print -quit 2>/dev/null)
+    fi
+    [ -z "$_pn_old_kpm" ] || fail "pre-existing runtime KPM blocks clean FR-014 preflight: $(basename "$_pn_old_kpm")"
+
+    if grep -Eq '(^|[[:space:]])patched[[:space:]]*=[[:space:]]*true([[:space:]]|$)' "$EVIDENCE/kernel-info.txt"; then
+        fail "resolved boot kernel is already KernelPatch-patched; clean FR-014 baseline required"
+    fi
 }
 
 run_production_rollback_check() {
@@ -168,6 +211,7 @@ case "$MODE" in
         record_cmd "kpimg file digest" sha256sum "$MODDIR/bin/kpimg" || true
         [ ! -f "$PNDIR/transaction.pending.json" ] || fail "unfinished flash transaction already exists"
         [ ! -f "$PNDIR/flash_recovery_required" ] || fail "flash recovery is already required"
+        require_clean_fr014_candidate
         if [ -f "$MODDIR/FLASH_REVIEW_BLOCKED" ]; then
             log "result=REVIEW_PACKAGE_INTENTIONALLY_BLOCKED"
         else
