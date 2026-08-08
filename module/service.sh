@@ -14,8 +14,6 @@ get_prop() {
 }
 
 KPN_CONFIG="$PNDIR/config"
-# Review branch default: surface unsigned KPMs instead of silently loading
-# them. Users can still choose off explicitly while developing local KPMs.
 KPM_SIGNATURE_POLICY=warn
 if [ -f "$KPN_CONFIG" ]; then
     _val=$(grep -E '^[[:space:]]*(export[[:space:]]+)?KPM_SIGNATURE_POLICY[[:space:]]*=' \
@@ -29,17 +27,17 @@ if [ -f "$KPN_CONFIG" ]; then
 fi
 
 case "$KPM_SIGNATURE_POLICY" in
-    off)    REQUIRE_KPM_SIGNATURES=0 ;;
+    off) REQUIRE_KPM_SIGNATURES=0 ;;
     warn|strict) REQUIRE_KPM_SIGNATURES=1 ;;
-    *)      REQUIRE_KPM_SIGNATURES=1 ;;
+    *) REQUIRE_KPM_SIGNATURES=1 ;;
 esac
 
 # shellcheck disable=SC1091
 . "$MODDIR/kpm_verify.sh" 2>/dev/null || true
-# Load only key-file validation/promotion helpers. This does not select a key
-# or issue a supercall by itself.
 # shellcheck disable=SC1091
 . "$MODDIR/patch/superkey_safety.sh" 2>/dev/null || true
+# shellcheck disable=SC1091
+. "$MODDIR/patch/transaction_safety.sh" 2>/dev/null || true
 
 mkdir -p "$PNDIR" "$KPM_DIR/failed" "$KPM_EVENT_DIR"
 echo "=== $(date) service.sh started ===" > "$LOG"
@@ -51,9 +49,7 @@ ROOT_MGR="unknown"
 if [ -f "$PNDIR/root_manager" ]; then
     _rm_raw="$(cat "$PNDIR/root_manager" 2>/dev/null || true)"
     _rm_sane="$(printf '%s' "$_rm_raw" | tr -cd 'a-z')"
-    if [ -n "$_rm_sane" ]; then
-        ROOT_MGR="$_rm_sane"
-    fi
+    [ -z "$_rm_sane" ] || ROOT_MGR="$_rm_sane"
 fi
 echo "[$(date)] root_manager=$ROOT_MGR" >> "$LOG"
 
@@ -65,30 +61,33 @@ fi
 
 try_pending_public1158_key() {
     command -v patchnest_read_key_file >/dev/null 2>&1 || return 1
-    command -v patchnest_key_file_is_secure >/dev/null 2>&1 || return 1
+    command -v patchnest_pending_transaction_matches_written_key >/dev/null 2>&1 || return 1
 
-    # Never override a committed key. Pending recovery is only for the
-    # power-loss window after a new Public1158 boot was written but before the
-    # pending credential could be atomically promoted.
+    # Pending recovery is only the crash window after a verified boot write and
+    # before credential/binding commit. It never overrides a committed key.
     [ ! -e "$PATCHNEST_SUPERKEY_FILE" ] || return 1
     [ -e "$PATCHNEST_SUPERKEY_PENDING_FILE" ] || return 1
+    [ -e "$PATCHNEST_PENDING_TRANSACTION_FILE" ] || return 1
 
     _pn_pending_key=$(patchnest_read_key_file "$PATCHNEST_SUPERKEY_PENDING_FILE") || {
         echo "[$(date)] ERROR: pending Public1158 key is insecure or invalid" >> "$LOG"
         return 1
     }
 
+    if ! patchnest_pending_transaction_matches_written_key "$_pn_pending_key"; then
+        echo "[$(date)] ERROR: pending key has no matching verified written transaction" >> "$LOG"
+        _pn_pending_key=''
+        return 1
+    fi
+
     _pn_pending_hello=$(PATCHNEST_SUPERKEY="$_pn_pending_key" kpatch hello 2>>"$LOG")
     _pn_pending_rc=$?
     _pn_pending_key=''
-
     if [ "$_pn_pending_rc" -ne 0 ] || [ "$_pn_pending_hello" != "hello1158" ]; then
         echo "[$(date)] Pending Public1158 key did not authenticate the running kernel" >> "$LOG"
         return 1
     fi
 
-    # The read-only hello proved the pending key belongs to the running kernel.
-    # Promote by one same-filesystem rename; do not chmod/mutate after mv.
     if ! mv -f "$PATCHNEST_SUPERKEY_PENDING_FILE" "$PATCHNEST_SUPERKEY_FILE"; then
         echo "[$(date)] ERROR: authenticated pending key could not be promoted" >> "$LOG"
         return 1
@@ -99,20 +98,17 @@ try_pending_public1158_key() {
         return 1
     fi
 
-    echo "[$(date)] RECOVERY: authenticated pending Public1158 key promoted after interrupted flash transaction" >> "$LOG"
+    echo "[$(date)] RECOVERY: pending key matched written transaction and authenticated running kernel" >> "$LOG"
     touch "$PNDIR/credential_recovered_pending"
-    # A crash before normal transaction commit means rollback binding may be
-    # absent. Keep unresolved visible until physical/operator review even though
-    # runtime authentication has been recovered.
+    patchnest_mark_recovery_required "credential_recovered_before_binding_commit" || true
+    # Runtime access has been recovered, but rollback authorization was not
+    # atomically committed before the crash. Keep operator review mandatory.
     touch "$MODDIR/unresolved"
     hello_out="hello1158"
     hello_rc=0
     return 0
 }
 
-# kpatch hello is the package-level ABI readiness gate. Capture the exact echo
-# and turn it into a capability profile; never infer mutation safety from a
-# numeric command ID shared by multiple KernelPatch families.
 retries=0
 max_retries=5
 hello_out=""
@@ -149,10 +145,6 @@ esac
 
 echo "[$(date)] kpatch hello OK: $hello_out profile=$ABI_PROFILE" >> "$LOG"
 printf '%s\n' "$ABI_PROFILE" > "$PNDIR/abi_profile"
-
-# Healthy userspace/kernel handshake. This only clears boot counters; it does
-# not clear unresolved because pending-key recovery and later subsystem errors
-# intentionally remain visible for operator review.
 echo "0" > "$PNDIR/boot_count" 2>/dev/null
 rm -f "$PNDIR/autorecovery_active" "$PNDIR/auto_unpatch_requested"
 
@@ -173,10 +165,9 @@ for kpm in "$KPM_DIR"/*.kpm "$KPM_DIR"/*.ko "$KPM_DIR"/*.o; do
                 echo "[$(date)] REJECTED (strict, unsigned): $(basename "$kpm"), moving to failed/" >> "$LOG"
                 mv "$kpm" "$KPM_DIR/failed/$(basename "$kpm")"
                 continue
-            else
-                echo "[$(date)] WARN (unsigned, policy=$KPM_SIGNATURE_POLICY): $(basename "$kpm") — loading anyway" >> "$LOG"
-                echo "unsigned:$(basename "$kpm"):$(date +%s)" >> "$PNDIR/unsigned_modules.log"
             fi
+            echo "[$(date)] WARN (unsigned, policy=$KPM_SIGNATURE_POLICY): $(basename "$kpm") — loading anyway" >> "$LOG"
+            echo "unsigned:$(basename "$kpm"):$(date +%s)" >> "$PNDIR/unsigned_modules.log"
         elif ! verify_kpm_sig "$kpm" "$_kpm_sig"; then
             echo "[$(date)] REJECTED (sig invalid): $(basename "$kpm"), moving to failed/" >> "$LOG"
             mv "$kpm" "$KPM_DIR/failed/$(basename "$kpm")"
@@ -198,7 +189,6 @@ for kpm in "$KPM_DIR"/*.kpm "$KPM_DIR"/*.ko "$KPM_DIR"/*.o; do
     fi
 done
 
-# 0x1100/0x1101 are rehook in Next2026 but SU grant/revoke in Public1158.
 if [ -n "$REHOOK" ]; then
     if [ "$ABI_PROFILE" = "public1158" ]; then
         echo "[$(date)] rehook request ignored: unsupported and unsafe on Public1158" >> "$LOG"
@@ -221,7 +211,6 @@ dispatch_event() {
         echo "[$(date)] Event $event_name skipped: ABI $ABI_PROFILE has no reviewed event capability" >> "$LOG"
         return 0
     fi
-
     echo "[$(date)] Dispatching Public1158 event: $event_name" >> "$LOG"
     if ! kpatch event "$event_name" "PatchNest" "" >>"$LOG" 2>&1; then
         echo "[$(date)] ERROR: Public1158 event dispatch failed: $event_name" >> "$LOG"
@@ -242,7 +231,6 @@ until [ "$(getprop sys.boot_completed)" = "1" ]; do
         break
     fi
 done
-
 if [ "$(getprop sys.boot_completed)" = "1" ]; then
     dispatch_event "BOOT_COMPLETED" || true
 fi
@@ -273,9 +261,7 @@ if [ -f "$CONFIG" ]; then
     done < "$_cfg_tmp"
     rm -f "$_cfg_tmp"
     echo "[$(date)] exclusion: applied=$excluded_count failed=$excluded_failed" >> "$LOG"
-    if [ "$excluded_failed" -gt 0 ]; then
-        touch "$MODDIR/unresolved"
-    fi
+    [ "$excluded_failed" -eq 0 ] || touch "$MODDIR/unresolved"
 fi
 
 echo "[$(date)] service.sh completed" >> "$LOG"
