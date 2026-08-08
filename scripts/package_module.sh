@@ -23,16 +23,11 @@ command -v unzip >/dev/null 2>&1 || { echo "unzip is required" >&2; exit 1; }
 command -v sort >/dev/null 2>&1 || { echo "sort is required" >&2; exit 1; }
 
 STAGE=$(mktemp -d)
-cleanup() {
-    rm -rf "$STAGE"
-}
+cleanup() { rm -rf "$STAGE"; }
 trap cleanup EXIT HUP INT TERM
 
 mkdir -p "$STAGE/module"
 cp -a "$SOURCE_DIR/." "$STAGE/module/"
-
-# ZIP's DOS timestamp field cannot represent dates before 1980. A fixed UTC
-# timestamp makes package bytes independent from checkout/build wall-clock time.
 find "$STAGE/module" -exec touch -h -t 200001010000.00 {} +
 
 mkdir -p "$(dirname "$OUTPUT_ABS")"
@@ -40,21 +35,12 @@ rm -f "$OUTPUT_ABS"
 
 (
     cd "$STAGE/module"
-    # Stable lexical path order + -X (no UID/GID/extra timestamp fields).
-    # Strip the find(1) "./" prefix so module.prop and META-INF live at the
-    # canonical ZIP root expected by Android root-manager installers.
     find . -type f -print | sed 's#^\./##' | LC_ALL=C sort > "$STAGE/file-list"
-    [ -s "$STAGE/file-list" ] || {
-        echo "module tree contains no files" >&2
-        exit 1
-    }
+    [ -s "$STAGE/file-list" ] || { echo "module tree contains no files" >&2; exit 1; }
     zip -X -q "$OUTPUT_ABS" -@ < "$STAGE/file-list"
 )
 
 [ -s "$OUTPUT_ABS" ] || { echo "deterministic package is empty" >&2; exit 1; }
-
-# The archive itself is the release boundary. Fail even when the source tree is
-# correct if any flash-safety/runtime artifact was omitted from the ZIP.
 unzip -Z1 "$OUTPUT_ABS" > "$STAGE/zip-list"
 for required in \
     module.prop \
@@ -62,6 +48,8 @@ for required in \
     customize.sh \
     service.sh \
     device_validation.sh \
+    arm_auto_recovery.sh \
+    verify_auto_recovery.sh \
     patch/boot_patch.sh \
     patch/boot_unpatch.sh \
     patch/flash_safety.sh \
@@ -74,7 +62,6 @@ for required in \
     }
 done
 
-# Canonical archive paths only: no traversal and no find(1) ./ prefixes.
 if grep -Eq '(^|/)\.\.(/|$)|^\./' "$STAGE/zip-list"; then
     echo "unsafe or non-canonical path found in module ZIP" >&2
     exit 1
