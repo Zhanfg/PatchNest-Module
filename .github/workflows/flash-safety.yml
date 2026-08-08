@@ -1,0 +1,53 @@
+name: Flash safety
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'module/patch/**'
+      - 'tests/flash_safety_contract.sh'
+      - '.github/workflows/flash-safety.yml'
+  push:
+    branches:
+      - 'review/flash-readiness-hardening'
+    paths:
+      - 'module/patch/**'
+      - 'tests/flash_safety_contract.sh'
+      - '.github/workflows/flash-safety.yml'
+  workflow_dispatch:
+
+jobs:
+  contract:
+    name: Transactional flash contract
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install shell validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Shell syntax
+        run: |
+          set -euo pipefail
+          for file in module/patch/*.sh tests/flash_safety_contract.sh; do
+            sh -n "$file"
+          done
+
+      - name: ShellCheck reviewed flash path
+        run: |
+          shellcheck -s sh -S warning \
+            --exclude=SC3043,SC2034,SC2115,SC2046,SC2319,SC2155 \
+            module/patch/boot_patch.sh \
+            module/patch/boot_extract.sh \
+            module/patch/boot_unpatch.sh \
+            module/patch/flash_safety.sh \
+            tests/flash_safety_contract.sh
+
+      - name: Run transactional flash contract
+        run: sh tests/flash_safety_contract.sh
