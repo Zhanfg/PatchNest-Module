@@ -31,7 +31,8 @@ EOF
     chmod 0755 "$_pn_mod/patch/boot_extract.sh"
     printf '%s\n' '#!/bin/sh' 'exit 0' > "$_pn_mod/patch/boot_unpatch.sh"
     chmod 0755 "$_pn_mod/patch/boot_unpatch.sh"
-    : > "$_pn_mod/patch/transaction_safety.sh"
+    cp "$ROOT/module/patch/transaction_safety.sh" "$_pn_mod/patch/transaction_safety.sh"
+    cp "$ROOT/module/patch/fr014_gate.sh" "$_pn_mod/patch/fr014_gate.sh"
     : > "$_pn_mod/patch/transactional_flash.sh"
 
     cat > "$_pn_mod/bin/magiskboot" <<'EOF'
@@ -59,8 +60,10 @@ EOF
     cat > "$_pn_mod/bin/getprop" <<'EOF'
 #!/bin/sh
 case "${1:-}" in
+  ro.boot.serialno|ro.serialno) printf '%s\n' 'SYNTHETIC-SERIAL' ;;
   ro.boot.slot_suffix) printf '%s\n' '_a' ;;
   ro.product.device) printf '%s\n' 'synthetic-device' ;;
+  ro.boot.vbmeta.digest) printf '%s\n' 'synthetic-vbmeta' ;;
   ro.boot.vbmeta.device_state) printf '%s\n' 'unlocked' ;;
   sys.boot_completed) printf '%s\n' '1' ;;
   *) printf '%s\n' '' ;;
@@ -75,6 +78,7 @@ EOF
 }
 
 run_preflight() {
+    PATCHNEST_TEST_PATCHED="${PATCHNEST_TEST_PATCHED:-0}" \
     PATCHNEST_MODDIR="$FIX_MOD" \
     PATCHNEST_STATE_DIR="$FIX_STATE" \
     PATCHNEST_EVIDENCE_DIR="$FIX_EVIDENCE" \
@@ -82,10 +86,15 @@ run_preflight() {
     sh "$FIX_MOD/device_validation.sh" preflight > "$FIX_EVIDENCE/stdout.log" 2>&1
 }
 
-# 1. Explicit candidate + stock kernel + empty historical state passes.
+# 1. Explicit candidate + stock kernel + empty historical state passes and
+# creates a secure receipt bound to the exact target/candidate identity.
 make_fixture clean
 run_preflight || fail "clean candidate was rejected"
 grep -Fq 'result=PREFLIGHT_PASS' "$FIX_EVIDENCE/validation.log" || fail "clean candidate did not emit PREFLIGHT_PASS"
+[ -f "$FIX_STATE/fr014_preflight.json" ] || fail "clean preflight receipt missing"
+[ "$(stat -c '%a' "$FIX_STATE/fr014_preflight.json")" = "600" ] || fail "preflight receipt is not mode 0600"
+grep -Fq '"preflight_pass": true' "$FIX_STATE/fr014_preflight.json" || fail "preflight receipt missing pass marker"
+grep -Fq "\"boot_target\": \"$FIX_TARGET\"" "$FIX_STATE/fr014_preflight.json" || fail "preflight receipt not bound to exact target"
 
 # 2. Old runtime KPM would be auto-loaded by service and must block a clean test.
 make_fixture old-kpm
