@@ -8,6 +8,9 @@ REHOOK="$(cat "$PNDIR/rehook" 2>/dev/null || true)"
 LOG="$PNDIR/service.log"
 KPM_DIR="$PNDIR/kpm"
 KPM_EVENT_DIR="$PNDIR/kpm_events"
+BOOT_COUNT_FILE="$PNDIR/boot_count"
+AUTO_UNPATCH_REQUEST="$PNDIR/auto_unpatch_requested"
+AUTORECOVERY_MARKER="$PNDIR/autorecovery_active"
 
 get_prop() {
     grep "^${1}=" "$2" 2>/dev/null | head -1 | cut -d'=' -f2-
@@ -63,9 +66,6 @@ try_pending_public1158_key() {
     command -v patchnest_read_key_file >/dev/null 2>&1 || return 1
     command -v patchnest_pending_transaction_matches_written_key >/dev/null 2>&1 || return 1
     command -v patchnest_commit_binding_from_pending_written >/dev/null 2>&1 || return 1
-
-    # This is only the crash window after a verified boot write but before the
-    # credential/binding commit. A committed key is never replaced here.
     [ ! -e "$PATCHNEST_SUPERKEY_FILE" ] || return 1
     [ -e "$PATCHNEST_SUPERKEY_PENDING_FILE" ] || return 1
     [ -e "$PATCHNEST_PENDING_TRANSACTION_FILE" ] || return 1
@@ -74,7 +74,6 @@ try_pending_public1158_key() {
         echo "[$(date)] ERROR: pending Public1158 key is insecure or invalid" >> "$LOG"
         return 1
     }
-
     if ! patchnest_pending_transaction_matches_written_key "$_pn_pending_key"; then
         echo "[$(date)] ERROR: pending key has no matching verified written transaction" >> "$LOG"
         _pn_pending_key=''
@@ -89,10 +88,6 @@ try_pending_public1158_key() {
         return 1
     fi
 
-    # The exact key/device/target/patched-byte tuple is now proven twice: by the
-    # pending transaction hash checks and by the kernel hello authentication.
-    # Promote the credential, then reconstruct rollback authorization from that
-    # same durable written transaction before allowing normal runtime mutation.
     if ! mv -f "$PATCHNEST_SUPERKEY_PENDING_FILE" "$PATCHNEST_SUPERKEY_FILE"; then
         echo "[$(date)] ERROR: authenticated pending key could not be promoted" >> "$LOG"
         _pn_pending_key=''
@@ -106,9 +101,8 @@ try_pending_public1158_key() {
     fi
 
     if ! patchnest_commit_binding_from_pending_written "$_pn_pending_key"; then
-        # Keep the active credential: it is the only authenticated access to the
-        # already-running patched kernel. But do not load KPMs or apply other
-        # mutations without a valid rollback authorization.
+        # Keep the active key: it is the only authenticated access to the
+        # already-running patched kernel. Block all further mutations instead.
         echo "[$(date)] ERROR: pending key recovered, but rollback binding reconstruction failed" >> "$LOG"
         patchnest_mark_recovery_required "pending_key_promoted_binding_recovery_failed" || true
         touch "$MODDIR/unresolved"
@@ -123,6 +117,79 @@ try_pending_public1158_key() {
     hello_rc=0
     return 0
 }
+
+resolve_runtime_boot_target() {
+    _pn_out=$(PATH="$MODDIR/bin:/data/adb/ksu/bin:/data/adb/magisk:$PATH" \
+        "$MODDIR/patch/boot_extract.sh" false 2>>"$LOG") || return 1
+    printf '%s\n' "$_pn_out" >> "$LOG"
+    _pn_target=$(printf '%s\n' "$_pn_out" | sed -n 's/^BOOTIMAGE=//p' | tail -n 1)
+    [ -n "$_pn_target" ] || return 1
+    _pn_target=$(readlink -f "$_pn_target" 2>/dev/null || printf '%s' "$_pn_target")
+    [ -e "$_pn_target" ] || return 1
+    printf '%s\n' "$_pn_target"
+}
+
+request_reboot_after_recovery() {
+    sync
+    if command -v setprop >/dev/null 2>&1; then
+        setprop sys.powerctl reboot 2>>"$LOG" || true
+    elif command -v reboot >/dev/null 2>&1; then
+        reboot 2>>"$LOG" || true
+    fi
+}
+
+handle_requested_auto_recovery() {
+    [ -f "$AUTO_UNPATCH_REQUEST" ] || return 0
+    echo "[$(date)] AUTO-RECOVERY: boot failure threshold reached; refusing normal runtime mutations" >> "$LOG"
+
+    _pn_target=$(resolve_runtime_boot_target) || {
+        echo "[$(date)] ERROR: auto-recovery cannot resolve exact boot target" >> "$LOG"
+        patchnest_mark_recovery_required "auto_recovery_target_resolution_failed" || true
+        return 1
+    }
+
+    # Normal case: a committed binding exists and recovery needs no working
+    # kernel ABI at all. This is deliberately attempted before hello/KPM work.
+    if PATH="$MODDIR/bin:/data/adb/ksu/bin:/data/adb/magisk:$PATH" \
+        "$MODDIR/patch/boot_unpatch.sh" --restore-bound-backup "$_pn_target" >>"$LOG" 2>&1; then
+        echo "[$(date)] AUTO-RECOVERY: exact rollback restored and read back" >> "$LOG"
+        touch "$PNDIR/auto_recovery_restored"
+        rm -f "$AUTO_UNPATCH_REQUEST"
+        request_reboot_after_recovery
+        return 10
+    fi
+
+    # Crash-window fallback: the boot write may have completed before key and
+    # binding commit. Only a state=written transaction + authenticated pending
+    # key is allowed to reconstruct rollback authorization, then retry restore.
+    echo "[$(date)] AUTO-RECOVERY: committed binding unavailable; checking verified pending transaction" >> "$LOG"
+    if try_pending_public1158_key; then
+        if PATH="$MODDIR/bin:/data/adb/ksu/bin:/data/adb/magisk:$PATH" \
+            "$MODDIR/patch/boot_unpatch.sh" --restore-bound-backup "$_pn_target" >>"$LOG" 2>&1; then
+            echo "[$(date)] AUTO-RECOVERY: recovered binding and restored exact backup" >> "$LOG"
+            touch "$PNDIR/auto_recovery_restored"
+            rm -f "$AUTO_UNPATCH_REQUEST"
+            request_reboot_after_recovery
+            return 10
+        fi
+    fi
+
+    echo "[$(date)] CRITICAL: automatic transaction-bound recovery failed" >> "$LOG"
+    patchnest_mark_recovery_required "automatic_bootloop_recovery_failed" || true
+    touch "$MODDIR/unresolved"
+    return 1
+}
+
+# A boot-loop recovery request is a higher-priority safety action than ABI
+# probing or KPM/exclusion mutations. Attempt rollback before normal service.
+if [ -f "$AUTO_UNPATCH_REQUEST" ]; then
+    handle_requested_auto_recovery
+    _pn_auto_rc=$?
+    case "$_pn_auto_rc" in
+        10) exit 0 ;;
+        *) exit 0 ;;
+    esac
+fi
 
 retries=0
 max_retries=5
@@ -160,8 +227,8 @@ esac
 
 echo "[$(date)] kpatch hello OK: $hello_out profile=$ABI_PROFILE" >> "$LOG"
 printf '%s\n' "$ABI_PROFILE" > "$PNDIR/abi_profile"
-echo "0" > "$PNDIR/boot_count" 2>/dev/null
-rm -f "$PNDIR/autorecovery_active" "$PNDIR/auto_unpatch_requested"
+# IMPORTANT: hello does not prove a healthy Android boot. boot_count and
+# autorecovery markers are cleared only after sys.boot_completed=1 below.
 
 for kpm in "$KPM_DIR"/*.kpm "$KPM_DIR"/*.ko "$KPM_DIR"/*.o; do
     [ -e "$kpm" ] || continue
@@ -238,16 +305,23 @@ dispatch_event() {
 dispatch_event "POST_FS_DATA" || true
 
 wait_count=0
+boot_completed=0
 until [ "$(getprop sys.boot_completed)" = "1" ]; do
     sleep 1
     wait_count=$((wait_count + 1))
     if [ "$wait_count" -ge 300 ]; then
-        echo "[$(date)] WARN: boot_completed timeout; BOOT_COMPLETED event will not be forged" >> "$LOG"
+        echo "[$(date)] ERROR: boot_completed timeout; failed-boot counter intentionally retained" >> "$LOG"
+        touch "$MODDIR/unresolved"
         break
     fi
 done
+
 if [ "$(getprop sys.boot_completed)" = "1" ]; then
+    boot_completed=1
     dispatch_event "BOOT_COMPLETED" || true
+    echo "0" > "$BOOT_COUNT_FILE" 2>/dev/null
+    rm -f "$AUTORECOVERY_MARKER" "$AUTO_UNPATCH_REQUEST"
+    echo "[$(date)] healthy boot confirmed; bootloop counter reset" >> "$LOG"
 fi
 
 if [ -f "$CONFIG" ]; then
@@ -279,4 +353,4 @@ if [ -f "$CONFIG" ]; then
     [ "$excluded_failed" -eq 0 ] || touch "$MODDIR/unresolved"
 fi
 
-echo "[$(date)] service.sh completed" >> "$LOG"
+echo "[$(date)] service.sh completed boot_completed=$boot_completed" >> "$LOG"
