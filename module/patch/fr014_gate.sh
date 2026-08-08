@@ -1,9 +1,10 @@
 #!/system/bin/sh
-# FR-014 physical-candidate one-time preflight receipt.
+# FR-014 physical-candidate one-time preflight/recovery-export gate.
 # Requires transaction_safety.sh helpers. It is a no-op for normal review/release
 # trees that do not contain FR014_DEVICE_CANDIDATE.
 
 PATCHNEST_FR014_PREFLIGHT_FILE="${PATCHNEST_FR014_PREFLIGHT_FILE:-/data/adb/patchnest/fr014_preflight.json}"
+PATCHNEST_RECOVERY_EXPORT_FILE="${PATCHNEST_RECOVERY_EXPORT_FILE:-${PATCHNEST_FR014_PREFLIGHT_FILE%/*}/recovery_export.json}"
 
 patchnest_fr014_module_dir() {
     if [ -n "${PATCHNEST_MODULE_DIR:-}" ]; then
@@ -64,6 +65,68 @@ EOF
     patchnest_state_file_is_secure "$PATCHNEST_FR014_PREFLIGHT_FILE"
 }
 
+patchnest_fr014_clean_state_still_holds() {
+    _pn_mod=$(patchnest_fr014_module_dir) || return 1
+    _pn_state=${PATCHNEST_FR014_PREFLIGHT_FILE%/*}
+    [ ! -f "$_pn_mod/unresolved" ] || {
+        >&2 echo "! Module became unresolved after FR-014 preflight"
+        return 1
+    }
+    for _pn_stale in \
+        rollback_binding.json \
+        transaction.pending.json \
+        flash_recovery_required \
+        superkey \
+        superkey.pending \
+        last_flash.json \
+        last_restore.json \
+        auto_unpatch_requested \
+        autorecovery_active \
+        auto_recovery_restored \
+        credential_recovered_pending; do
+        [ ! -e "$_pn_state/$_pn_stale" ] || {
+            >&2 echo "! PatchNest state changed after FR-014 preflight: $_pn_stale"
+            return 1
+        }
+    done
+    if [ -d "$_pn_state/kpm" ]; then
+        _pn_kpm=$(find "$_pn_state/kpm" -maxdepth 1 -type f \( -name '*.kpm' -o -name '*.ko' -o -name '*.o' \) -print -quit 2>/dev/null)
+        [ -z "$_pn_kpm" ] || {
+            >&2 echo "! Runtime KPM appeared after FR-014 preflight"
+            return 1
+        }
+    fi
+    return 0
+}
+
+patchnest_fr014_recovery_export_matches() {
+    _pn_target=$1
+    _pn_expected_target_sha=$2
+    patchnest_state_file_is_secure "$PATCHNEST_RECOVERY_EXPORT_FILE" || {
+        >&2 echo "! FR-014 candidate requires a verified recovery boot export after preflight"
+        return 1
+    }
+    [ "$(patchnest_json_bool verified "$PATCHNEST_RECOVERY_EXPORT_FILE")" = "true" ] || return 1
+    _pn_export_target=$(patchnest_json_string boot_target "$PATCHNEST_RECOVERY_EXPORT_FILE")
+    _pn_export_sha=$(patchnest_json_string image_sha256 "$PATCHNEST_RECOVERY_EXPORT_FILE")
+    _pn_export_size=$(patchnest_json_number image_size "$PATCHNEST_RECOVERY_EXPORT_FILE")
+    [ "$_pn_export_target" = "$_pn_target" ] || {
+        >&2 echo "! Recovery export belongs to a different boot target"
+        return 1
+    }
+    printf '%s' "$_pn_export_sha" | grep -Eq '^[0-9a-f]{64}$' || return 1
+    printf '%s' "$_pn_export_size" | grep -Eq '^[1-9][0-9]*$' || return 1
+    [ "$_pn_export_sha" = "$_pn_expected_target_sha" ] || {
+        >&2 echo "! Recovery export SHA does not match preflight boot SHA"
+        return 1
+    }
+    [ "$(patchnest_hash_file "$_pn_target")" = "$_pn_export_sha" ] || {
+        >&2 echo "! Live boot target no longer matches exported recovery image"
+        return 1
+    }
+    return 0
+}
+
 patchnest_consume_fr014_preflight_if_required() {
     _pn_target=$1
     patchnest_fr014_candidate_active || return 0
@@ -97,10 +160,12 @@ patchnest_consume_fr014_preflight_if_required() {
         >&2 echo "! FR-014 candidate identity changed after preflight"
         return 1
     }
+    patchnest_fr014_clean_state_still_holds || return 1
+    patchnest_fr014_recovery_export_matches "$_pn_target" "$_pn_expected_target" || return 1
 
-    # One successful validation authorizes one destructive attempt only. Consume
-    # before the transaction is staged; any later pre-write failure requires a
-    # fresh read-only preflight rather than silently reusing stale approval.
+    # One successful validation/export pair authorizes one destructive attempt.
+    # Consume preflight approval before transaction staging; the recovery export
+    # receipt is retained because it is boot-critical evidence for later rescue.
     patchnest_clear_fr014_preflight_receipt || return 1
     return 0
 }
