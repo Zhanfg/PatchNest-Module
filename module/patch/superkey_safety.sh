@@ -3,6 +3,7 @@
 # This file is sourced by boot_patch.sh. It never prints the key value.
 
 PATCHNEST_SUPERKEY_FILE="${PATCHNEST_SUPERKEY_FILE:-/data/adb/patchnest/superkey}"
+PATCHNEST_SUPERKEY_PENDING_FILE="${PATCHNEST_SUPERKEY_PENDING_FILE:-/data/adb/patchnest/superkey.pending}"
 PATCHNEST_EXPORT_KEY_DIR="${PATCHNEST_EXPORT_KEY_DIR:-/data/adb/patchnest/export_keys}"
 PATCHNEST_SUPERKEY=''
 PATCHNEST_SUPERKEY_IS_NEW=0
@@ -23,13 +24,43 @@ patchnest_expected_key_owner() {
     fi
 }
 
-patchnest_existing_key_is_secure() {
-    [ -f "$PATCHNEST_SUPERKEY_FILE" ] || return 1
-    _pn_mode=$(stat -c '%a' "$PATCHNEST_SUPERKEY_FILE" 2>/dev/null) || return 1
-    _pn_owner=$(stat -c '%u' "$PATCHNEST_SUPERKEY_FILE" 2>/dev/null) || return 1
+patchnest_key_file_is_secure() {
+    _pn_key_file=$1
+    [ -f "$_pn_key_file" ] || return 1
+    [ ! -L "$_pn_key_file" ] || return 1
+    _pn_mode=$(stat -c '%a' "$_pn_key_file" 2>/dev/null) || return 1
+    _pn_owner=$(stat -c '%u' "$_pn_key_file" 2>/dev/null) || return 1
     _pn_expected_owner=$(patchnest_expected_key_owner) || return 1
     [ "$_pn_mode" = "600" ] || return 1
     [ "$_pn_owner" = "$_pn_expected_owner" ] || return 1
+}
+
+patchnest_read_key_file() {
+    _pn_key_file=$1
+    patchnest_key_file_is_secure "$_pn_key_file" || return 1
+    _pn_read=$(head -n 1 "$_pn_key_file" 2>/dev/null | tr -d '\r\n')
+    patchnest_validate_superkey "$_pn_read" || return 1
+    printf '%s\n' "$_pn_read"
+}
+
+patchnest_write_pending_key() {
+    _pn_value=$1
+    patchnest_validate_superkey "$_pn_value" || return 1
+    _pn_dir=${PATCHNEST_SUPERKEY_PENDING_FILE%/*}
+    mkdir -p "$_pn_dir" || return 1
+    umask 077
+    _pn_tmp="${PATCHNEST_SUPERKEY_PENDING_FILE}.tmp.$$"
+    printf '%s\n' "$_pn_value" > "$_pn_tmp" || return 1
+    chmod 0600 "$_pn_tmp" || { rm -f "$_pn_tmp"; return 1; }
+    [ "$(stat -c '%a' "$_pn_tmp" 2>/dev/null)" = "600" ] || {
+        rm -f "$_pn_tmp"
+        return 1
+    }
+    mv -f "$_pn_tmp" "$PATCHNEST_SUPERKEY_PENDING_FILE" || {
+        rm -f "$_pn_tmp"
+        return 1
+    }
+    patchnest_key_file_is_secure "$PATCHNEST_SUPERKEY_PENDING_FILE" || return 1
 }
 
 patchnest_prepare_superkey() {
@@ -38,20 +69,28 @@ patchnest_prepare_superkey() {
     PATCHNEST_SUPERKEY_IS_NEW=0
 
     if [ -e "$PATCHNEST_SUPERKEY_FILE" ]; then
-        [ -f "$PATCHNEST_SUPERKEY_FILE" ] || {
-            >&2 echo "! Existing PatchNest superkey path is not a regular file"
-            return 1
-        }
-        patchnest_existing_key_is_secure || {
-            >&2 echo "! Existing PatchNest superkey must be securely owned and mode 0600"
-            return 1
-        }
-        _pn_existing=$(head -n 1 "$PATCHNEST_SUPERKEY_FILE" 2>/dev/null | tr -d '\r\n')
-        patchnest_validate_superkey "$_pn_existing" || {
-            >&2 echo "! Existing PatchNest superkey file is invalid"
+        _pn_existing=$(patchnest_read_key_file "$PATCHNEST_SUPERKEY_FILE") || {
+            >&2 echo "! Existing PatchNest superkey must be a secure root-owned mode 0600 regular file"
             return 1
         }
         PATCHNEST_SUPERKEY=$_pn_existing
+        export PATCHNEST_SUPERKEY
+        # A committed key wins. A leftover pending file cannot be part of the
+        # active credential state and is safe to discard.
+        rm -f "$PATCHNEST_SUPERKEY_PENDING_FILE"
+        return 0
+    fi
+
+    # If a destructive operation was interrupted after staging a pending key,
+    # reuse that credential. It may already match a boot image written just
+    # before power loss.
+    if [ "${FLASH_TO_DEVICE:-false}" = "true" ] && [ -e "$PATCHNEST_SUPERKEY_PENDING_FILE" ]; then
+        _pn_pending=$(patchnest_read_key_file "$PATCHNEST_SUPERKEY_PENDING_FILE") || {
+            >&2 echo "! Pending PatchNest superkey is insecure or invalid"
+            return 1
+        }
+        PATCHNEST_SUPERKEY=$_pn_pending
+        PATCHNEST_SUPERKEY_IS_NEW=1
         export PATCHNEST_SUPERKEY
         return 0
     fi
@@ -73,10 +112,16 @@ patchnest_prepare_superkey() {
         return 1
     }
 
-    umask 077
-    printf '%s\n' "$_pn_generated" > "$_pn_workdir/superkey.candidate" || return 1
-    chmod 0600 "$_pn_workdir/superkey.candidate" || return 1
-    [ "$(stat -c '%a' "$_pn_workdir/superkey.candidate" 2>/dev/null)" = "600" ] || return 1
+    if [ "${FLASH_TO_DEVICE:-false}" = "true" ]; then
+        # Persist only as pending before the boot write. The active key path is
+        # left untouched until the written image has passed readback.
+        patchnest_write_pending_key "$_pn_generated" || return 1
+    else
+        umask 077
+        printf '%s\n' "$_pn_generated" > "$_pn_workdir/superkey.candidate" || return 1
+        chmod 0600 "$_pn_workdir/superkey.candidate" || return 1
+    fi
+
     PATCHNEST_SUPERKEY=$_pn_generated
     PATCHNEST_SUPERKEY_IS_NEW=1
     export PATCHNEST_SUPERKEY
@@ -87,21 +132,19 @@ patchnest_superkey_sha256() {
     printf '%s' "$PATCHNEST_SUPERKEY" | sha256sum | awk '{print $1}'
 }
 
-patchnest_drop_binding_after_key_failure() {
-    [ "${1:-0}" -eq 0 ] || patchnest_remove_rollback_binding
+patchnest_revert_new_key_to_pending() {
+    [ "$PATCHNEST_SUPERKEY_IS_NEW" -eq 1 ] || return 0
+    if [ -f "$PATCHNEST_SUPERKEY_FILE" ] && [ ! -e "$PATCHNEST_SUPERKEY_PENDING_FILE" ]; then
+        mv -f "$PATCHNEST_SUPERKEY_FILE" "$PATCHNEST_SUPERKEY_PENDING_FILE" 2>/dev/null || true
+    fi
 }
 
 patchnest_commit_superkey() {
     [ -n "$PATCHNEST_SUPERKEY" ] || return 1
 
-    # Existing credentials are already the committed identity of the current
-    # installation. Verify them, but never rewrite the file as part of a new
-    # flash transaction.
     if [ "$PATCHNEST_SUPERKEY_IS_NEW" -eq 0 ]; then
-        patchnest_existing_key_is_secure || return 1
-        _pn_existing=$(head -n 1 "$PATCHNEST_SUPERKEY_FILE" 2>/dev/null | tr -d '\r\n')
+        _pn_existing=$(patchnest_read_key_file "$PATCHNEST_SUPERKEY_FILE") || return 1
         [ "$_pn_existing" = "$PATCHNEST_SUPERKEY" ] || return 1
-
         if [ "${FLASH_TO_DEVICE:-false}" = "true" ]; then
             command -v patchnest_commit_rollback_binding >/dev/null 2>&1 || return 1
             patchnest_commit_rollback_binding || return 1
@@ -109,61 +152,41 @@ patchnest_commit_superkey() {
         return 0
     fi
 
-    # New credentials are committed only after the boot write passed readback.
-    # Bind rollback first; any later key failure removes the binding and causes
-    # boot_patch.sh to restore the verified pre-write image.
-    _pn_binding_committed=0
+    # For destructive writes a durable pending key already exists. Promote it
+    # only after the image passed readback. This makes power loss before this
+    # point recoverable by service.sh without weakening kernel authentication.
     if [ "${FLASH_TO_DEVICE:-false}" = "true" ]; then
-        command -v patchnest_commit_rollback_binding >/dev/null 2>&1 || return 1
-        patchnest_commit_rollback_binding || return 1
-        _pn_binding_committed=1
+        _pn_pending=$(patchnest_read_key_file "$PATCHNEST_SUPERKEY_PENDING_FILE") || return 1
+        [ "$_pn_pending" = "$PATCHNEST_SUPERKEY" ] || return 1
+
+        [ ! -e "$PATCHNEST_SUPERKEY_FILE" ] || return 1
+        mv -f "$PATCHNEST_SUPERKEY_PENDING_FILE" "$PATCHNEST_SUPERKEY_FILE" || return 1
+        _pn_committed=$(patchnest_read_key_file "$PATCHNEST_SUPERKEY_FILE") || {
+            patchnest_revert_new_key_to_pending
+            return 1
+        }
+        [ "$_pn_committed" = "$PATCHNEST_SUPERKEY" ] || {
+            patchnest_revert_new_key_to_pending
+            return 1
+        }
+
+        # The key now matches the verified boot image. Commit rollback binding
+        # last. If binding creation fails, move the key back to pending before
+        # the caller rolls the boot image back. If power fails in that window,
+        # the pending-key recovery handshake still reaches the written boot.
+        command -v patchnest_commit_rollback_binding >/dev/null 2>&1 || {
+            patchnest_revert_new_key_to_pending
+            return 1
+        }
+        patchnest_commit_rollback_binding || {
+            patchnest_revert_new_key_to_pending
+            return 1
+        }
+        return 0
     fi
 
-    _pn_dir=${PATCHNEST_SUPERKEY_FILE%/*}
-    mkdir -p "$_pn_dir" || {
-        patchnest_drop_binding_after_key_failure "$_pn_binding_committed"
-        return 1
-    }
-
-    umask 077
-    _pn_tmp="${PATCHNEST_SUPERKEY_FILE}.tmp.$$"
-    printf '%s\n' "$PATCHNEST_SUPERKEY" > "$_pn_tmp" || {
-        patchnest_drop_binding_after_key_failure "$_pn_binding_committed"
-        return 1
-    }
-    chmod 0600 "$_pn_tmp" || {
-        rm -f "$_pn_tmp"
-        patchnest_drop_binding_after_key_failure "$_pn_binding_committed"
-        return 1
-    }
-    [ "$(stat -c '%a' "$_pn_tmp" 2>/dev/null)" = "600" ] || {
-        rm -f "$_pn_tmp"
-        patchnest_drop_binding_after_key_failure "$_pn_binding_committed"
-        return 1
-    }
-
-    # Single irreversible key-file transition. mv preserves the already checked
-    # 0600 mode, so there is no post-mv chmod that could create a half-state.
-    mv -f "$_pn_tmp" "$PATCHNEST_SUPERKEY_FILE" || {
-        rm -f "$_pn_tmp"
-        patchnest_drop_binding_after_key_failure "$_pn_binding_committed"
-        return 1
-    }
-
-    # Verification after rename performs no mutation. If it fails, remove the
-    # newly created credential and rollback authorization before the caller
-    # restores the verified boot backup.
-    if ! patchnest_existing_key_is_secure; then
-        rm -f "$PATCHNEST_SUPERKEY_FILE"
-        patchnest_drop_binding_after_key_failure "$_pn_binding_committed"
-        return 1
-    fi
-    _pn_committed=$(head -n 1 "$PATCHNEST_SUPERKEY_FILE" 2>/dev/null | tr -d '\r\n')
-    if [ "$_pn_committed" != "$PATCHNEST_SUPERKEY" ]; then
-        rm -f "$PATCHNEST_SUPERKEY_FILE"
-        patchnest_drop_binding_after_key_failure "$_pn_binding_committed"
-        return 1
-    fi
+    # Export-only image: no active device key is committed. The caller stores
+    # a root-only image-hash keyed credential record instead.
     return 0
 }
 
@@ -176,7 +199,9 @@ patchnest_store_export_key() {
     mkdir -p "$PATCHNEST_EXPORT_KEY_DIR" || return 1
     umask 077
     _pn_out="$PATCHNEST_EXPORT_KEY_DIR/${_pn_image_sha}.superkey"
-    printf '%s\n' "$PATCHNEST_SUPERKEY" > "$_pn_out" || return 1
-    chmod 0600 "$_pn_out" || return 1
+    _pn_tmp="${_pn_out}.tmp.$$"
+    printf '%s\n' "$PATCHNEST_SUPERKEY" > "$_pn_tmp" || return 1
+    chmod 0600 "$_pn_tmp" || { rm -f "$_pn_tmp"; return 1; }
+    mv -f "$_pn_tmp" "$_pn_out" || { rm -f "$_pn_tmp"; return 1; }
     printf '%s\n' "$_pn_out"
 }
