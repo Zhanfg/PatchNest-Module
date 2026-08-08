@@ -43,9 +43,11 @@ patchnest_commit_rollback_binding() {
 
     _pn_backup_sha=$(sha256sum "$BACKUP_CANDIDATE" 2>/dev/null | awk '{print $1}')
     _pn_patched_sha=$(sha256sum "$WORKDIR/new-boot.img" 2>/dev/null | awk '{print $1}')
+    _pn_patched_size=$(stat -c '%s' "$WORKDIR/new-boot.img" 2>/dev/null)
     _pn_device_sha=$(patchnest_device_binding_sha256) || return 1
     printf '%s' "$_pn_backup_sha" | grep -Eq '^[0-9a-f]{64}$' || return 1
     printf '%s' "$_pn_patched_sha" | grep -Eq '^[0-9a-f]{64}$' || return 1
+    printf '%s' "$_pn_patched_size" | grep -Eq '^[1-9][0-9]*$' || return 1
 
     _pn_key_sha="null"
     if command -v patchnest_superkey_sha256 >/dev/null 2>&1; then
@@ -70,6 +72,7 @@ patchnest_commit_rollback_binding() {
   "rollback_backup": "$_pn_backup_name",
   "rollback_backup_sha256": "$_pn_backup_sha",
   "patched_image_sha256": "$_pn_patched_sha",
+  "patched_image_size": $_pn_patched_size,
   "superkey_sha256": "$_pn_key_sha",
   "verified_readback": true,
   "committed_at": "$_pn_when"
