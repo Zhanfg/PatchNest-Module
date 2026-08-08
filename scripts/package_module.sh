@@ -50,6 +50,7 @@ for required in \
     device_validation.sh \
     arm_auto_recovery.sh \
     verify_auto_recovery.sh \
+    export_recovery_boot.sh \
     patch/boot_patch.sh \
     patch/boot_unpatch.sh \
     patch/flash_safety.sh \
