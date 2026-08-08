@@ -18,7 +18,7 @@ grep -Fq 'unrecognized successful hello response' "$SERVICE" || fail "unknown he
 
 # Public1158 command 0x1100/0x1101 means SU grant/revoke, not rehook. The
 # service must branch on profile before any `kpatch rehook` invocation.
-public_guard=$(grep -n 'ABI_PROFILE.*public1158' "$SERVICE" | grep 'rehook' -B1 -A1 | head -n1 | cut -d: -f1 || true)
+public_guard=$(grep -n 'if \[ "$ABI_PROFILE" = "public1158" \]; then' "$SERVICE" | head -n1 | cut -d: -f1 || true)
 rehook_call=$(grep -n 'kpatch rehook' "$SERVICE" | head -n1 | cut -d: -f1 || true)
 [ -n "$public_guard" ] || fail "Public1158 rehook guard missing"
 [ -n "$rehook_call" ] || fail "Next2026 rehook call missing"
@@ -26,7 +26,7 @@ rehook_call=$(grep -n 'kpatch rehook' "$SERVICE" | head -n1 | cut -d: -f1 || tru
 grep -Fq 'rehook request ignored: unsupported and unsafe on Public1158' "$SERVICE" || fail "Public1158 rehook rejection is not explicit"
 
 # KPM event dispatch is a reviewed Public1158 capability only.
-grep -Fq 'ABI_PROFILE" != "public1158' "$SERVICE" || fail "event dispatch is not profile-gated"
+grep -Fq 'if [ "$ABI_PROFILE" != "public1158" ]; then' "$SERVICE" || fail "event dispatch is not profile-gated"
 grep -Fq 'kpatch event "$event_name" "PatchNest" ""' "$SERVICE" || fail "Public1158 event dispatch missing"
 
 # The module may only build the separately reviewed Public1158 compatibility
