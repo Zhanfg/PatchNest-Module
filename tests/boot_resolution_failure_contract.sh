@@ -35,6 +35,27 @@ printf '%s\n' KEEP > "$PATCH/recovery-helper.sentinel"
     [ -f "$PATCH/recovery-helper.sentinel" ] || { echo "boot resolution failure contract: FAIL: recovery sentinel deleted" >&2; exit 1; }
 )
 
+# The runtime abort override must still terminate its caller but must not run
+# the imported installer cleanup that recursively removes MODPATH.
+set +e
+(
+    MODPATH="$PATCH"
+    BOOTMODE=true
+    OUTFD=1
+    TMPDIR="$TMP/disposable-abort"
+    mkdir -p "$TMPDIR"
+    export MODPATH BOOTMODE OUTFD TMPDIR
+    # shellcheck disable=SC1090
+    . "$PATCH/util_functions.sh"
+    # shellcheck disable=SC1090
+    . "$PATCH/flash_safety.sh"
+    abort '! synthetic runtime abort'
+    exit 0
+) >/dev/null 2>&1
+abort_rc=$?
+set -e
+[ "$abort_rc" -ne 0 ] || { echo "boot resolution failure contract: FAIL: abort did not terminate" >&2; exit 1; }
+
 [ -d "$PATCH" ] || { echo "boot resolution failure contract: FAIL: helper tree missing after failure" >&2; exit 1; }
 [ -f "$PATCH/recovery-helper.sentinel" ] || { echo "boot resolution failure contract: FAIL: sentinel missing after failure" >&2; exit 1; }
 
