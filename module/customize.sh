@@ -1,13 +1,13 @@
 #!/system/bin/sh
 MODDIR="/data/adb/modules/PatchNest"
 
-# This review branch is intentionally non-flashable until the P0 gates in
-# FLASH_READINESS.md are closed. The marker is packaged into the module so a
-# review artifact cannot be mistaken for a release artifact.
+# This review branch is intentionally non-flashable until physical-device
+# lifecycle validation is complete. The marker is checked before any persistent
+# PatchNest state is created.
 if [ -f "${MODPATH:-$MODDIR}/FLASH_REVIEW_BLOCKED" ]; then
     ui_print "! PatchNest review build: flashing is intentionally blocked"
-    ui_print "! P0 flash-readiness gates are still open"
-    ui_print "! Use a reviewed release artifact, not this branch"
+    ui_print "! Physical-device flash-readiness gate is still open"
+    ui_print "! Use the isolated device-validation candidate only for FR-014"
     abort "! FLASH_REVIEW_BLOCKED"
 fi
 
@@ -33,6 +33,8 @@ ui_print "- Root manager: $ROOT_MGR"
 ui_print "- Architecture: $ARCH"
 
 set_perm_recursive "$MODPATH/bin" 0 2000 0755 0755
+set_perm_recursive "$MODPATH/patch" 0 0 0755 0755
+[ ! -f "$MODPATH/device_validation.sh" ] || set_perm "$MODPATH/device_validation.sh" 0 0 0755
 
 mkdir -p /data/adb/patchnest
 
@@ -54,22 +56,29 @@ fi
 if [ ! -x "$MODPATH/bin/kptools" ]; then
     abort "! kptools binary missing or not executable in $MODPATH/bin"
 fi
+if [ ! -x "$MODPATH/patch/boot_patch.sh" ] || [ ! -x "$MODPATH/patch/boot_unpatch.sh" ]; then
+    abort "! PatchNest boot transaction scripts are not executable"
+fi
+if [ ! -x "$MODPATH/device_validation.sh" ]; then
+    abort "! Physical-device validation harness is missing or not executable"
+fi
 
 echo "$ROOT_MGR" > /data/adb/patchnest/root_manager
 
 cp "$MODPATH/module.prop" "$MODPATH/module.prop.bak"
 
 rm -rf "$MODDIR/webroot"/* 2>/dev/null || true
-rm -rf "$MODDIR/bin"/*     2>/dev/null || true
-rm -rf "$MODDIR/patch"/*   2>/dev/null || true
+rm -rf "$MODDIR/bin"/* 2>/dev/null || true
+rm -rf "$MODDIR/patch"/* 2>/dev/null || true
 [ -d "$MODDIR/webroot" ] || mkdir -p "$MODDIR/webroot"
-[ -d "$MODDIR/bin" ]     || mkdir -p "$MODDIR/bin"
-[ -d "$MODDIR/patch" ]   || mkdir -p "$MODDIR/patch"
+[ -d "$MODDIR/bin" ] || mkdir -p "$MODDIR/bin"
+[ -d "$MODDIR/patch" ] || mkdir -p "$MODDIR/patch"
 cp -rf "$MODPATH/webroot"/* "$MODDIR/webroot/" 2>/dev/null || true
-cp -rf "$MODPATH/bin"/*     "$MODDIR/bin/"     2>/dev/null || true
-cp -rf "$MODPATH/patch"/*   "$MODDIR/patch/"   2>/dev/null || true
-
+cp -rf "$MODPATH/bin"/* "$MODDIR/bin/" 2>/dev/null || true
+cp -rf "$MODPATH/patch"/* "$MODDIR/patch/" 2>/dev/null || true
 cp -f "$MODPATH/detect_env.sh" "$MODDIR/detect_env.sh" 2>/dev/null || true
+cp -f "$MODPATH/device_validation.sh" "$MODDIR/device_validation.sh" 2>/dev/null || true
+chmod 0755 "$MODDIR/patch"/*.sh "$MODDIR/device_validation.sh" 2>/dev/null || true
 
 ui_print "- Installation complete"
 ui_print ""
