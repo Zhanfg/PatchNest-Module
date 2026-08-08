@@ -5,10 +5,9 @@
 PATCHNEST_ROLLBACK_BINDING_FILE="${PATCHNEST_ROLLBACK_BINDING_FILE:-/data/adb/patchnest/rollback_binding.json}"
 
 patchnest_device_binding_sha256() {
-    # Tests may supply a deterministic synthetic identity. Production uses the
-    # boot serial plus immutable-ish boot/product context, then stores only the
-    # digest so the raw serial never enters PatchNest manifests/logs.
-    if [ -n "${PATCHNEST_DEVICE_IDENTITY:-}" ]; then
+    # Synthetic identity is an offline-test hook only. Production always uses
+    # the real boot serial/context and stores only the digest, never the serial.
+    if [ "${PATCHNEST_TRANSACTION_TEST:-0}" = "1" ] && [ -n "${PATCHNEST_DEVICE_IDENTITY:-}" ]; then
         _pn_identity=$PATCHNEST_DEVICE_IDENTITY
     else
         command -v getprop >/dev/null 2>&1 || return 1
