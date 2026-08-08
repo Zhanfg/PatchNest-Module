@@ -1,0 +1,3 @@
+PatchNest FR-014 physical-device validation candidate.
+Base reviewed runtime commit: 9154127d3c6c2cea8828b236a7a791bfcf382b41
+NOT A RELEASE. Do not publish or merge as a production release until FR-014 evidence passes.
