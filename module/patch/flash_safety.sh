@@ -13,12 +13,11 @@ fi
 
 # util_functions.sh was imported from an installer context where abort() may
 # delete $MODPATH. Inside the installed PatchNest patch tree $MODPATH is
-# persistent recovery code, so destructive cleanup is never valid. Override it
-# for every reviewed runtime entry point before any target-resolution helper is
-# called.
+# persistent recovery code, so destructive cleanup is never valid. Preserve
+# abort's terminating semantics without deleting any persistent helper tree.
 abort() {
   >&2 echo "$1"
-  return 1
+  exit 1
 }
 
 # No eval: supported Magisk/APatch config keys are assigned explicitly.
