@@ -35,18 +35,28 @@ case "$KPM_SIGNATURE_POLICY" in
     *) REQUIRE_KPM_SIGNATURES=1 ;;
 esac
 
-# shellcheck disable=SC1091
-. "$MODDIR/kpm_verify.sh" 2>/dev/null || true
-# shellcheck disable=SC1091
-. "$MODDIR/patch/superkey_safety.sh" 2>/dev/null || true
-# shellcheck disable=SC1091
-. "$MODDIR/patch/transaction_safety.sh" 2>/dev/null || true
-
 mkdir -p "$PNDIR" "$KPM_DIR/failed" "$KPM_EVENT_DIR"
 echo "=== $(date) service.sh started ===" > "$LOG"
 echo "[$(date)] MODDIR=$MODDIR" >> "$LOG"
 echo "[$(date)] PATH=$PATH" >> "$LOG"
 echo "[$(date)] KPM_SIGNATURE_POLICY=$KPM_SIGNATURE_POLICY" >> "$LOG"
+
+# Signature verification is optional only when policy permits unsigned modules.
+# Transaction/key helpers are boot-safety critical and must load successfully.
+# shellcheck disable=SC1091
+. "$MODDIR/kpm_verify.sh" 2>/dev/null || true
+if [ ! -r "$MODDIR/patch/superkey_safety.sh" ] || \
+   ! . "$MODDIR/patch/superkey_safety.sh" 2>>"$LOG"; then
+    echo "[$(date)] ERROR: superkey safety helper unavailable" >> "$LOG"
+    touch "$MODDIR/unresolved"
+    exit 0
+fi
+if [ ! -r "$MODDIR/patch/transaction_safety.sh" ] || \
+   ! . "$MODDIR/patch/transaction_safety.sh" 2>>"$LOG"; then
+    echo "[$(date)] ERROR: transaction safety helper unavailable" >> "$LOG"
+    touch "$MODDIR/unresolved"
+    exit 0
+fi
 
 ROOT_MGR="unknown"
 if [ -f "$PNDIR/root_manager" ]; then
@@ -59,6 +69,31 @@ echo "[$(date)] root_manager=$ROOT_MGR" >> "$LOG"
 if [ ! -x "$MODDIR/bin/kpatch" ]; then
     echo "[$(date)] ERROR: kpatch binary not found or not executable" >> "$LOG"
     touch "$MODDIR/unresolved"
+    exit 0
+fi
+
+# A dedicated FR-014 candidate is installed while the device still boots its
+# pre-test stock target. Until durable PatchNest transaction/credential evidence
+# exists, hello failure is expected and must not be misclassified as a bootloop
+# or unresolved patched-kernel failure.
+fr014_prepatch_idle() {
+    [ -f "$MODDIR/FR014_DEVICE_CANDIDATE" ] || return 1
+    for _pn_evidence in \
+        rollback_binding.json \
+        transaction.pending.json \
+        flash_recovery_required \
+        superkey \
+        superkey.pending \
+        last_flash.json; do
+        [ ! -e "$PNDIR/$_pn_evidence" ] || return 1
+    done
+    return 0
+}
+
+if fr014_prepatch_idle; then
+    echo "[$(date)] FR-014 candidate pre-patch idle: no kernel ABI probe or runtime mutations" >> "$LOG"
+    printf '%s\n' 0 > "$BOOT_COUNT_FILE" 2>/dev/null || true
+    rm -f "$AUTORECOVERY_MARKER" "$AUTO_UNPATCH_REQUEST" "$MODDIR/unresolved"
     exit 0
 fi
 
@@ -101,8 +136,6 @@ try_pending_public1158_key() {
     fi
 
     if ! patchnest_commit_binding_from_pending_written "$_pn_pending_key"; then
-        # Keep the active key: it is the only authenticated access to the
-        # already-running patched kernel. Block all further mutations instead.
         echo "[$(date)] ERROR: pending key recovered, but rollback binding reconstruction failed" >> "$LOG"
         patchnest_mark_recovery_required "pending_key_promoted_binding_recovery_failed" || true
         touch "$MODDIR/unresolved"
@@ -148,8 +181,6 @@ handle_requested_auto_recovery() {
         return 1
     }
 
-    # Normal case: a committed binding exists and recovery needs no working
-    # kernel ABI at all. This is deliberately attempted before hello/KPM work.
     if PATH="$MODDIR/bin:/data/adb/ksu/bin:/data/adb/magisk:$PATH" \
         "$MODDIR/patch/boot_unpatch.sh" --restore-bound-backup "$_pn_target" >>"$LOG" 2>&1; then
         echo "[$(date)] AUTO-RECOVERY: exact rollback restored and read back" >> "$LOG"
@@ -159,9 +190,6 @@ handle_requested_auto_recovery() {
         return 10
     fi
 
-    # Crash-window fallback: the boot write may have completed before key and
-    # binding commit. Only a state=written transaction + authenticated pending
-    # key is allowed to reconstruct rollback authorization, then retry restore.
     echo "[$(date)] AUTO-RECOVERY: committed binding unavailable; checking verified pending transaction" >> "$LOG"
     if try_pending_public1158_key; then
         if PATH="$MODDIR/bin:/data/adb/ksu/bin:/data/adb/magisk:$PATH" \
@@ -180,8 +208,6 @@ handle_requested_auto_recovery() {
     return 1
 }
 
-# A boot-loop recovery request is a higher-priority safety action than ABI
-# probing or KPM/exclusion mutations. Attempt rollback before normal service.
 if [ -f "$AUTO_UNPATCH_REQUEST" ]; then
     handle_requested_auto_recovery
     _pn_auto_rc=$?
@@ -227,13 +253,35 @@ esac
 
 echo "[$(date)] kpatch hello OK: $hello_out profile=$ABI_PROFILE" >> "$LOG"
 printf '%s\n' "$ABI_PROFILE" > "$PNDIR/abi_profile"
-# IMPORTANT: hello does not prove a healthy Android boot. boot_count and
-# autorecovery markers are cleared only after sys.boot_completed=1 below.
+
+validate_runtime_kpm() {
+    _pn_file=$1
+    command -v xxd >/dev/null 2>&1 || return 1
+    [ -f "$_pn_file" ] && [ ! -L "$_pn_file" ] && [ -s "$_pn_file" ] || return 1
+    _pn_hdr=$(xxd -p -l 20 "$_pn_file" 2>/dev/null | tr -d '\r\n')
+    [ "$(printf '%s' "$_pn_hdr" | cut -c1-12)" = "7f454c460201" ] || return 1
+    [ "$(printf '%s' "$_pn_hdr" | cut -c37-40)" = "b700" ] || return 1
+    PATH="$MODDIR/bin:$PATH" kptools -l -M "$_pn_file" >/dev/null 2>&1 || return 1
+    return 0
+}
 
 for kpm in "$KPM_DIR"/*.kpm "$KPM_DIR"/*.ko "$KPM_DIR"/*.o; do
     [ -e "$kpm" ] || continue
     [ -s "$kpm" ] || continue
     mod_basename=$(basename "$kpm" | sed 's/\.\(kpm\|ko\|o\)$//')
+
+    if [ ! -f "$KPM_EVENT_DIR/${mod_basename}.autoload" ]; then
+        echo "[$(date)] KPM autoload disabled or unregistered: $(basename "$kpm")" >> "$LOG"
+        continue
+    fi
+
+    if ! validate_runtime_kpm "$kpm"; then
+        echo "[$(date)] REJECTED (invalid/non-AArch64 KPM): $(basename "$kpm"), moving to failed/" >> "$LOG"
+        mv "$kpm" "$KPM_DIR/failed/$(basename "$kpm")" 2>/dev/null || true
+        rm -f "$KPM_EVENT_DIR/${mod_basename}.autoload"
+        continue
+    fi
+
     args=""
     if [ -f "$KPM_EVENT_DIR/${mod_basename}.args" ]; then
         raw_args="$(cat "$KPM_EVENT_DIR/${mod_basename}.args" 2>/dev/null || true)"
@@ -246,14 +294,16 @@ for kpm in "$KPM_DIR"/*.kpm "$KPM_DIR"/*.ko "$KPM_DIR"/*.o; do
             if [ "$KPM_SIGNATURE_POLICY" = "strict" ]; then
                 echo "[$(date)] REJECTED (strict, unsigned): $(basename "$kpm"), moving to failed/" >> "$LOG"
                 mv "$kpm" "$KPM_DIR/failed/$(basename "$kpm")"
+                rm -f "$KPM_EVENT_DIR/${mod_basename}.autoload"
                 continue
             fi
             echo "[$(date)] WARN (unsigned, policy=$KPM_SIGNATURE_POLICY): $(basename "$kpm") — loading anyway" >> "$LOG"
             echo "unsigned:$(basename "$kpm"):$(date +%s)" >> "$PNDIR/unsigned_modules.log"
-        elif ! verify_kpm_sig "$kpm" "$_kpm_sig"; then
-            echo "[$(date)] REJECTED (sig invalid): $(basename "$kpm"), moving to failed/" >> "$LOG"
+        elif ! command -v verify_kpm_sig >/dev/null 2>&1 || ! verify_kpm_sig "$kpm" "$_kpm_sig"; then
+            echo "[$(date)] REJECTED (sig invalid/unverifiable): $(basename "$kpm"), moving to failed/" >> "$LOG"
             mv "$kpm" "$KPM_DIR/failed/$(basename "$kpm")"
             mv "$_kpm_sig" "$KPM_DIR/failed/$(basename "$_kpm_sig")" 2>/dev/null || true
+            rm -f "$KPM_EVENT_DIR/${mod_basename}.autoload"
             continue
         fi
     fi
@@ -266,6 +316,7 @@ for kpm in "$KPM_DIR"/*.kpm "$KPM_DIR"/*.ko "$KPM_DIR"/*.o; do
     if [ $? -ne 0 ]; then
         echo "[$(date)] Failed to load: $(basename "$kpm"), moving to failed/" >> "$LOG"
         mv "$kpm" "$KPM_DIR/failed/$(basename "$kpm")"
+        rm -f "$KPM_EVENT_DIR/${mod_basename}.autoload"
     else
         echo "[$(date)] Loaded: $(basename "$kpm") args=[$args]" >> "$LOG"
     fi
@@ -327,16 +378,20 @@ fi
 if [ -f "$CONFIG" ]; then
     excluded_count=0
     excluded_failed=0
-    _cfg_tmp=$(mktemp /data/local/tmp/patchnest_cfg.XXXXXX)
+    _cfg_tmp=$(mktemp /data/local/tmp/patchnest_cfg.XXXXXX) || {
+        echo "[$(date)] ERROR: cannot create exclusion workspace" >> "$LOG"
+        touch "$MODDIR/unresolved"
+        exit 0
+    }
     tail -n +2 "$CONFIG" > "$_cfg_tmp"
     while IFS= read -r line; do
         [ -z "$line" ] && continue
-        pkg=$(echo "$line" | awk -F, '{print $1}')
-        exclude=$(echo "$line" | awk -F, '{print $2}')
-        uid=$(echo "$line" | awk -F, '{print $4}')
-        if [ "$exclude" = "1" ] && [ -n "$pkg" ] && [ -n "$uid" ]; then
-            pkgq=$(printf '%s' "$pkg" | sed 's/[][\.*^$()+?{|/]/\\&/g')
-            UID_VAL=$(grep -F " $uid" /data/system/packages.list 2>/dev/null | grep "^$pkgq " | head -1 | awk '{print $2}')
+        pkg=$(printf '%s' "$line" | awk -F, '{print $1}')
+        exclude=$(printf '%s' "$line" | awk -F, '{print $2}')
+        uid=$(printf '%s' "$line" | awk -F, '{print $4}')
+        if [ "$exclude" = "1" ] && [ -n "$pkg" ] && printf '%s' "$uid" | grep -Eq '^[0-9]+$'; then
+            UID_VAL=$(awk -v p="$pkg" -v u="$uid" '$1 == p && $2 == u { print $2; exit }' \
+                /data/system/packages.list 2>/dev/null)
             if [ -n "$UID_VAL" ]; then
                 if kpatch exclude_set "$UID_VAL" 1 >>"$LOG" 2>&1; then
                     excluded_count=$((excluded_count + 1))
