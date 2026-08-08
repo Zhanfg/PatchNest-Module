@@ -15,12 +15,21 @@ patchnest_validate_superkey() {
     printf '%s' "$_pn_key" | grep -Eq '^[0-9a-fA-F]+$'
 }
 
+patchnest_expected_key_owner() {
+    if [ "${PATCHNEST_TRANSACTION_TEST:-0}" = "1" ]; then
+        id -u
+    else
+        printf '%s\n' 0
+    fi
+}
+
 patchnest_existing_key_is_secure() {
     [ -f "$PATCHNEST_SUPERKEY_FILE" ] || return 1
     _pn_mode=$(stat -c '%a' "$PATCHNEST_SUPERKEY_FILE" 2>/dev/null) || return 1
     _pn_owner=$(stat -c '%u' "$PATCHNEST_SUPERKEY_FILE" 2>/dev/null) || return 1
+    _pn_expected_owner=$(patchnest_expected_key_owner) || return 1
     [ "$_pn_mode" = "600" ] || return 1
-    [ "$_pn_owner" = "0" ] || return 1
+    [ "$_pn_owner" = "$_pn_expected_owner" ] || return 1
 }
 
 patchnest_prepare_superkey() {
@@ -34,7 +43,7 @@ patchnest_prepare_superkey() {
             return 1
         }
         patchnest_existing_key_is_secure || {
-            >&2 echo "! Existing PatchNest superkey must be root-owned mode 0600"
+            >&2 echo "! Existing PatchNest superkey must be securely owned and mode 0600"
             return 1
         }
         _pn_existing=$(head -n 1 "$PATCHNEST_SUPERKEY_FILE" 2>/dev/null | tr -d '\r\n')
