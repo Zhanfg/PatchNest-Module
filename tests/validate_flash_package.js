@@ -55,6 +55,8 @@ for (const [rel, minSize] of [
   ['install_kpm.sh', 1],
   ['compile_kpm.sh', 1],
   ['kpm_verify.sh', 1],
+  ['validate_kpm_file.sh', 1],
+  ['kpatch_runtime_wrapper.sh', 1],
   ['device_validation.sh', 1],
   ['arm_auto_recovery.sh', 1],
   ['verify_auto_recovery.sh', 1],
@@ -139,6 +141,32 @@ if (!installer.includes('7f454c460201') || !installer.includes('b700')) {
 } else pass('KPM installer enforces AArch64 ELF admission');
 if (!installer.includes('FR014_DEVICE_CANDIDATE')) fail('FR-014 candidate does not block persistent KPM installation');
 else pass('FR-014 candidate blocks persistent KPM installation');
+
+const directValidator = read('validate_kpm_file.sh');
+if (!directValidator.includes('7f454c460201') || !directValidator.includes('b700')) {
+  fail('direct KPM validator lacks AArch64 ELF admission');
+} else pass('direct KPM validator enforces AArch64 ELF admission');
+if (!directValidator.includes('KPM_CYCLE') || !directValidator.includes('FR014_DEVICE_CANDIDATE')) {
+  fail('direct KPM validator lacks explicit FR-014 diagnostic exception boundary');
+} else pass('direct KPM validator isolates FR-014 diagnostic KPM cycle');
+
+const wrapper = read('kpatch_runtime_wrapper.sh');
+if (!wrapper.includes('kpatch.real')) fail('runtime kpatch wrapper does not delegate to kpatch.real');
+else pass('runtime kpatch wrapper delegates to kpatch.real');
+if (!wrapper.includes('"${1:-}" = "kpm"') || !wrapper.includes('"${2:-}" = "load"')) {
+  fail('runtime wrapper does not intercept kpm load');
+} else pass('runtime wrapper intercepts kpm load');
+if (!wrapper.includes('validate_kpm_file.sh')) fail('runtime wrapper does not invoke direct KPM admission helper');
+else pass('runtime wrapper invokes direct KPM admission helper');
+
+const customize = read('customize.sh');
+for (const required of ['kpatch.real', 'kpatch_runtime_wrapper.sh', 'validate_kpm_file.sh', 'binarySha256']) {
+  if (!customize.includes(required)) fail(`installer missing runtime-wrapper invariant: ${required}`);
+}
+if (customize.includes('mv "$MODPATH/bin/kpatch" "$MODPATH/bin/kpatch.real"') &&
+    customize.includes('cp "$MODPATH/kpatch_runtime_wrapper.sh" "$MODPATH/bin/kpatch"')) {
+  pass('installer preserves validated CLI and replaces entry point with runtime guard');
+}
 
 const service = read('service.sh');
 if (!service.includes('.autoload')) fail('service does not require explicit KPM autoload markers');
