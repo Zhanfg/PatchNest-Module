@@ -22,6 +22,17 @@ command -v zip >/dev/null 2>&1 || { echo "zip is required" >&2; exit 1; }
 command -v unzip >/dev/null 2>&1 || { echo "unzip is required" >&2; exit 1; }
 command -v sort >/dev/null 2>&1 || { echo "sort is required" >&2; exit 1; }
 
+# Candidate packaging must be explicit and cannot accidentally include the
+# review lock at the same time.
+[ -f "$SOURCE_DIR/FR014_DEVICE_CANDIDATE" ] || {
+    echo "FR014_DEVICE_CANDIDATE marker missing" >&2
+    exit 1
+}
+[ ! -e "$SOURCE_DIR/FLASH_REVIEW_BLOCKED" ] || {
+    echo "review blocker still present in device candidate" >&2
+    exit 1
+}
+
 STAGE=$(mktemp -d)
 cleanup() { rm -rf "$STAGE"; }
 trap cleanup EXIT HUP INT TERM
@@ -44,7 +55,7 @@ rm -f "$OUTPUT_ABS"
 unzip -Z1 "$OUTPUT_ABS" > "$STAGE/zip-list"
 for required in \
     module.prop \
-    FLASH_REVIEW_BLOCKED \
+    FR014_DEVICE_CANDIDATE \
     customize.sh \
     service.sh \
     device_validation.sh \
@@ -58,11 +69,14 @@ for required in \
     patch/transactional_flash.sh \
     patch/superkey_safety.sh; do
     grep -Fxq "$required" "$STAGE/zip-list" || {
-        echo "required package entry missing: $required" >&2
+        echo "required candidate package entry missing: $required" >&2
         exit 1
     }
 done
-
+! grep -Fxq 'FLASH_REVIEW_BLOCKED' "$STAGE/zip-list" || {
+    echo "review blocker unexpectedly packaged in candidate" >&2
+    exit 1
+}
 if grep -Eq '(^|/)\.\.(/|$)|^\./' "$STAGE/zip-list"; then
     echo "unsafe or non-canonical path found in module ZIP" >&2
     exit 1
