@@ -56,6 +56,7 @@ for required in \
     patch/flash_safety.sh \
     patch/transaction_safety.sh \
     patch/transactional_flash.sh \
+    patch/fr014_gate.sh \
     patch/superkey_safety.sh; do
     grep -Fxq "$required" "$STAGE/zip-list" || {
         echo "required package entry missing: $required" >&2
