@@ -67,6 +67,7 @@ for _pn_script in \
     flash_safety.sh \
     transaction_safety.sh \
     transactional_flash.sh \
+    fr014_gate.sh \
     superkey_safety.sh; do
     if [ ! -x "$MODPATH/patch/$_pn_script" ]; then
         abort "! Required patch helper missing or not executable: patch/$_pn_script"
