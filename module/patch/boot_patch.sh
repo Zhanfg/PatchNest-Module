@@ -21,6 +21,8 @@ INVOCATION_CWD=$(pwd)
 . "$MODPATH/util_functions.sh"
 # shellcheck disable=SC1091
 . "$MODPATH/flash_safety.sh"
+# shellcheck disable=SC1091
+. "$MODPATH/superkey_safety.sh"
 
 BOOTIMAGE=${1:-}
 FLASH_TO_DEVICE=${2:-}
@@ -151,6 +153,7 @@ write_verified_backup() {
 
   _pn_taken_at=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date +%Y-%m-%dT%H:%M:%S)
   _pn_kpimg_sha=$(hash_path "$WORKDIR/kpimg") || return 1
+  _pn_superkey_sha=$(patchnest_superkey_sha256) || return 1
 
   cat > "$MANIFEST_CANDIDATE.tmp" <<EOF
 {
@@ -165,6 +168,7 @@ write_verified_backup() {
   "backup_sha256": "$_pn_backup_sha",
   "backup_size": $_pn_backup_size,
   "kpimg_sha256": "$_pn_kpimg_sha",
+  "superkey_sha256": "$_pn_superkey_sha",
   "backup_verified": true
 }
 EOF
@@ -220,12 +224,14 @@ write_flash_receipt() {
   _pn_sha=$(hash_path "$_pn_image") || return 1
   _pn_size=$(wc -c < "$_pn_image" 2>/dev/null | tr -d ' ')
   _pn_time=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date +%Y-%m-%dT%H:%M:%S)
+  _pn_key_sha=$(patchnest_superkey_sha256) || return 1
   mkdir -p "$PNDIR" || return 1
   cat > "$PNDIR/last_flash.json.tmp" <<EOF
 {
   "boot_target": "$(json_escape "$BOOT_TARGET")",
   "written_sha256": "$_pn_sha",
   "written_size": $_pn_size,
+  "superkey_sha256": "$_pn_key_sha",
   "verified_readback": true,
   "flashed_at": "$(json_escape "$_pn_time")"
 }
@@ -236,6 +242,11 @@ EOF
 cd "$WORKDIR" || exit 1
 cp "$KPIMG_SOURCE" "$WORKDIR/kpimg" || { >&2 echo "! Failed to stage kpimg"; exit 1; }
 [ -s "$WORKDIR/kpimg" ] || { >&2 echo "! Staged kpimg is empty"; exit 1; }
+
+# Public1158 KPM management is superkey-authenticated. Prepare a key before
+# building the image, but do not persist a newly generated key until a device
+# write has passed exact-range readback verification.
+patchnest_prepare_superkey "$WORKDIR" || exit 1
 
 echo "- Unpacking current boot image into private workspace"
 if ! magiskboot unpack "$BOOT_TARGET" >/dev/null 2>&1; then
@@ -265,7 +276,7 @@ fi
 mv kernel kernel.ori
 
 echo "- Patching kernel"
-if ! kptools -p -i kernel.ori -k kpimg -o kernel "$@"; then
+if ! kptools -p -i kernel.ori -k kpimg -s "$PATCHNEST_SUPERKEY" -o kernel "$@"; then
   >&2 echo "! Kernel patch failed"
   exit 1
 fi
@@ -294,14 +305,34 @@ if [ "$FLASH_TO_DEVICE" = "true" ]; then
     save_image_to_storage "$WORKDIR/new-boot.img" || true
     exit 1
   fi
-  if ! write_flash_receipt "$WORKDIR/new-boot.img"; then
-    >&2 echo "! Flash succeeded but receipt creation failed"
+
+  if ! patchnest_commit_superkey; then
+    >&2 echo "! Patched image verified, but superkey persistence failed"
+    >&2 echo "! Rolling back to the verified pre-write boot image"
+    flash_image "$BACKUP_CANDIDATE" "$BOOT_TARGET"
+    _pn_rollback_rc=$?
+    if [ "$_pn_rollback_rc" -ne 0 ]; then
+      >&2 echo "! CRITICAL: automatic rollback failed: $_pn_rollback_rc"
+      >&2 echo "! Verified recovery image remains at: $BACKUP_CANDIDATE"
+    else
+      echo "- Rollback verified after superkey persistence failure"
+    fi
     exit 1
   fi
-  echo "- Successfully flashed and verified"
+
+  if ! write_flash_receipt "$WORKDIR/new-boot.img"; then
+    >&2 echo "! Flash and superkey commit succeeded, but receipt creation failed"
+    exit 1
+  fi
+  echo "- Successfully flashed, read back, and committed Public1158 credentials"
 else
+  _pn_export_key=$(patchnest_store_export_key "$WORKDIR/new-boot.img") || {
+    >&2 echo "! Could not store root-only credential record for exported image"
+    exit 1
+  }
   save_image_to_storage "$WORKDIR/new-boot.img" || exit 1
   echo "- Successfully patched and validated"
+  echo "- Root-only credential record: $_pn_export_key"
 fi
 
 exit 0
