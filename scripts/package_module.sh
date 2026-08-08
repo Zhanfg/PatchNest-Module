@@ -40,8 +40,10 @@ rm -f "$OUTPUT_ABS"
 (
     cd "$STAGE/module"
     # Stable lexical path order + -X (no UID/GID/extra timestamp fields).
+    # Strip the find(1) "./" prefix so module.prop and META-INF live at the
+    # canonical ZIP root expected by Android root-manager installers.
     # File modes are preserved by cp -a and stored by zip on Unix.
-    find . -type f -print | LC_ALL=C sort > "$STAGE/file-list"
+    find . -type f -print | sed 's#^\./##' | LC_ALL=C sort > "$STAGE/file-list"
     [ -s "$STAGE/file-list" ] || {
         echo "module tree contains no files" >&2
         exit 1
