@@ -46,7 +46,7 @@ ui_print "- Architecture: $ARCH"
 # explicit permissions; never copy the tree into a hard-coded manager path.
 set_perm_recursive "$MODPATH/bin" 0 2000 0755 0755
 set_perm_recursive "$MODPATH/patch" 0 0 0755 0755
-for _pn_tool in device_validation.sh arm_auto_recovery.sh verify_auto_recovery.sh; do
+for _pn_tool in device_validation.sh arm_auto_recovery.sh verify_auto_recovery.sh export_recovery_boot.sh; do
     [ ! -f "$MODPATH/$_pn_tool" ] || set_perm "$MODPATH/$_pn_tool" 0 0 0755
 done
 
@@ -72,7 +72,7 @@ for _pn_script in \
         abort "! Required patch helper missing or not executable: patch/$_pn_script"
     fi
 done
-for _pn_tool in device_validation.sh arm_auto_recovery.sh verify_auto_recovery.sh; do
+for _pn_tool in device_validation.sh arm_auto_recovery.sh verify_auto_recovery.sh export_recovery_boot.sh; do
     if [ ! -x "$MODPATH/$_pn_tool" ]; then
         abort "! Required physical-validation tool missing or not executable: $_pn_tool"
     fi
@@ -96,14 +96,8 @@ ui_print "- PatchNest files validated in manager-provided MODPATH"
 ui_print "- Persistent state initialized"
 ui_print "- Installation complete"
 ui_print ""
-ui_print "  Next steps:"
-ui_print "  1. Reboot your device"
-if [ "$ROOT_MGR" = "magisk" ]; then
-    ui_print "  2. Install KSUWebUIStandalone app"
-    ui_print "     (no native WebUI support in Magisk)"
-    ui_print "  3. Open WebUI via Manager → Action button"
-else
-    ui_print "  2. Open WebUI via Manager → PatchNest → Action"
-fi
-ui_print "  4. Run read-only device_validation.sh preflight before patching"
-ui_print "  5. Do not remove the review blocker outside the FR-014 candidate"
+ui_print "  Before the first destructive FR-014 flash:"
+ui_print "  1. Run device_validation.sh preflight"
+ui_print "  2. Run export_recovery_boot.sh with the explicit RECOVERY_EXPORT unlock"
+ui_print "  3. Copy the recovery image + manifest off-device and verify SHA-256"
+ui_print "  4. Only then start the controlled flash lifecycle"
