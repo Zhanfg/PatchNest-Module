@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 PATCH="$ROOT/module/patch/boot_patch.sh"
 SAFETY="$ROOT/module/patch/flash_safety.sh"
 SUPERKEY="$ROOT/module/patch/superkey_safety.sh"
