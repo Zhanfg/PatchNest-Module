@@ -26,6 +26,17 @@ command -v zip >/dev/null 2>&1 || { echo "zip is required" >&2; exit 1; }
 command -v unzip >/dev/null 2>&1 || { echo "unzip is required" >&2; exit 1; }
 command -v sort >/dev/null 2>&1 || { echo "sort is required" >&2; exit 1; }
 
+# This branch is an isolated physical-test package. Refuse to build unless the
+# candidate identity is explicit and the normal review blocker is absent.
+[ -f "$SOURCE_DIR/FR014_DEVICE_CANDIDATE" ] || {
+    echo "FR-014 candidate marker missing" >&2
+    exit 1
+}
+[ ! -e "$SOURCE_DIR/FLASH_REVIEW_BLOCKED" ] || {
+    echo "review blocker must not be present in FR-014 candidate" >&2
+    exit 1
+}
+
 if [ -s "$SOURCE_DIR/bin/kpatch" ] && \
    [ -s "$SOURCE_DIR/bin/kptools" ] && \
    [ -s "$SOURCE_DIR/bin/kpimg" ] && \
@@ -64,7 +75,7 @@ rm -f "$OUTPUT_ABS"
 unzip -Z1 "$OUTPUT_ABS" > "$STAGE/zip-list"
 for required in \
     module.prop \
-    FLASH_REVIEW_BLOCKED \
+    FR014_DEVICE_CANDIDATE \
     customize.sh \
     service.sh \
     post-fs-data.sh \
@@ -88,11 +99,15 @@ for required in \
     patch/fr014_gate.sh \
     patch/superkey_safety.sh; do
     grep -Fxq "$required" "$STAGE/zip-list" || {
-        echo "required package entry missing: $required" >&2
+        echo "required candidate package entry missing: $required" >&2
         exit 1
     }
 done
 
+if grep -Fxq 'FLASH_REVIEW_BLOCKED' "$STAGE/zip-list"; then
+    echo "candidate ZIP unexpectedly contains FLASH_REVIEW_BLOCKED" >&2
+    exit 1
+fi
 if grep -Eq '(^|/)\.\.(/|$)|^\./' "$STAGE/zip-list"; then
     echo "unsafe or non-canonical path found in module ZIP" >&2
     exit 1
