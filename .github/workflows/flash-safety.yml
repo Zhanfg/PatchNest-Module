@@ -12,17 +12,20 @@ on:
       - 'scripts/device_validation.sh'
       - 'version.properties'
       - 'tests/flash_safety_contract.sh'
+      - 'tests/destructive_transaction_contract.sh'
       - 'tests/runtime_abi_contract.sh'
       - '.github/workflows/flash-safety.yml'
   push:
     branches:
       - 'review/flash-readiness-hardening'
+      - 'review/flash-readiness-final'
     paths:
       - 'module/patch/**'
       - 'module/service.sh'
       - 'scripts/device_validation.sh'
       - 'version.properties'
       - 'tests/flash_safety_contract.sh'
+      - 'tests/destructive_transaction_contract.sh'
       - 'tests/runtime_abi_contract.sh'
       - '.github/workflows/flash-safety.yml'
   workflow_dispatch:
@@ -43,7 +46,7 @@ jobs:
       - name: Shell syntax
         run: |
           set -euo pipefail
-          for file in module/patch/*.sh module/service.sh scripts/device_validation.sh tests/flash_safety_contract.sh tests/runtime_abi_contract.sh; do
+          for file in module/patch/*.sh module/service.sh scripts/device_validation.sh tests/flash_safety_contract.sh tests/destructive_transaction_contract.sh tests/runtime_abi_contract.sh; do
             sh -n "$file"
           done
 
@@ -56,16 +59,23 @@ jobs:
             module/patch/boot_unpatch.sh \
             module/patch/flash_safety.sh \
             module/patch/transaction_safety.sh \
+            module/patch/transactional_flash.sh \
             module/patch/superkey_safety.sh \
             module/service.sh \
             scripts/device_validation.sh \
             tests/flash_safety_contract.sh \
+            tests/destructive_transaction_contract.sh \
             tests/runtime_abi_contract.sh
 
-      - name: Run transactional flash contract
+      - name: Run baseline flash contract
         env:
           PATCHNEST_TRANSACTION_TEST: '1'
         run: sh tests/flash_safety_contract.sh
+
+      - name: Run destructive failure-injection contract
+        env:
+          PATCHNEST_TRANSACTION_TEST: '1'
+        run: sh tests/destructive_transaction_contract.sh
 
       - name: Run runtime ABI contract
         run: sh tests/runtime_abi_contract.sh
