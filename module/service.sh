@@ -36,6 +36,10 @@ esac
 
 # shellcheck disable=SC1091
 . "$MODDIR/kpm_verify.sh" 2>/dev/null || true
+# Load only key-file validation/promotion helpers. This does not select a key
+# or issue a supercall by itself.
+# shellcheck disable=SC1091
+. "$MODDIR/patch/superkey_safety.sh" 2>/dev/null || true
 
 mkdir -p "$PNDIR" "$KPM_DIR/failed" "$KPM_EVENT_DIR"
 echo "=== $(date) service.sh started ===" > "$LOG"
@@ -59,12 +63,60 @@ if [ ! -x "$MODDIR/bin/kpatch" ]; then
     exit 0
 fi
 
+try_pending_public1158_key() {
+    command -v patchnest_read_key_file >/dev/null 2>&1 || return 1
+    command -v patchnest_key_file_is_secure >/dev/null 2>&1 || return 1
+
+    # Never override a committed key. Pending recovery is only for the
+    # power-loss window after a new Public1158 boot was written but before the
+    # pending credential could be atomically promoted.
+    [ ! -e "$PATCHNEST_SUPERKEY_FILE" ] || return 1
+    [ -e "$PATCHNEST_SUPERKEY_PENDING_FILE" ] || return 1
+
+    _pn_pending_key=$(patchnest_read_key_file "$PATCHNEST_SUPERKEY_PENDING_FILE") || {
+        echo "[$(date)] ERROR: pending Public1158 key is insecure or invalid" >> "$LOG"
+        return 1
+    }
+
+    _pn_pending_hello=$(PATCHNEST_SUPERKEY="$_pn_pending_key" kpatch hello 2>>"$LOG")
+    _pn_pending_rc=$?
+    _pn_pending_key=''
+
+    if [ "$_pn_pending_rc" -ne 0 ] || [ "$_pn_pending_hello" != "hello1158" ]; then
+        echo "[$(date)] Pending Public1158 key did not authenticate the running kernel" >> "$LOG"
+        return 1
+    fi
+
+    # The read-only hello proved the pending key belongs to the running kernel.
+    # Promote by one same-filesystem rename; do not chmod/mutate after mv.
+    if ! mv -f "$PATCHNEST_SUPERKEY_PENDING_FILE" "$PATCHNEST_SUPERKEY_FILE"; then
+        echo "[$(date)] ERROR: authenticated pending key could not be promoted" >> "$LOG"
+        return 1
+    fi
+    if ! patchnest_key_file_is_secure "$PATCHNEST_SUPERKEY_FILE"; then
+        mv -f "$PATCHNEST_SUPERKEY_FILE" "$PATCHNEST_SUPERKEY_PENDING_FILE" 2>/dev/null || true
+        echo "[$(date)] ERROR: promoted Public1158 key failed security verification" >> "$LOG"
+        return 1
+    fi
+
+    echo "[$(date)] RECOVERY: authenticated pending Public1158 key promoted after interrupted flash transaction" >> "$LOG"
+    touch "$PNDIR/credential_recovered_pending"
+    # A crash before normal transaction commit means rollback binding may be
+    # absent. Keep unresolved visible until physical/operator review even though
+    # runtime authentication has been recovered.
+    touch "$MODDIR/unresolved"
+    hello_out="hello1158"
+    hello_rc=0
+    return 0
+}
+
 # kpatch hello is the package-level ABI readiness gate. Capture the exact echo
 # and turn it into a capability profile; never infer mutation safety from a
 # numeric command ID shared by multiple KernelPatch families.
 retries=0
 max_retries=5
 hello_out=""
+hello_rc=1
 while [ "$retries" -lt "$max_retries" ]; do
     hello_out="$(kpatch hello 2>>"$LOG")"
     hello_rc=$?
@@ -77,10 +129,12 @@ while [ "$retries" -lt "$max_retries" ]; do
 done
 
 if [ "$hello_rc" -ne 0 ] || [ -z "$hello_out" ]; then
-    echo "[$(date)] ERROR: kpatch/kernel ABI handshake failed after $retries retries" >> "$LOG"
-    echo "[$(date)] Refusing KPM/exclude/rehook/event operations; package is unresolved." >> "$LOG"
-    touch "$MODDIR/unresolved"
-    exit 0
+    if ! try_pending_public1158_key; then
+        echo "[$(date)] ERROR: kpatch/kernel ABI handshake failed after $retries retries" >> "$LOG"
+        echo "[$(date)] Refusing KPM/exclude/rehook/event operations; package is unresolved." >> "$LOG"
+        touch "$MODDIR/unresolved"
+        exit 0
+    fi
 fi
 
 case "$hello_out" in
@@ -96,8 +150,9 @@ esac
 echo "[$(date)] kpatch hello OK: $hello_out profile=$ABI_PROFILE" >> "$LOG"
 printf '%s\n' "$ABI_PROFILE" > "$PNDIR/abi_profile"
 
-# Healthy userspace/kernel handshake. This only clears the userspace marker;
-# it does not claim physical boot-loop recovery has been validated.
+# Healthy userspace/kernel handshake. This only clears boot counters; it does
+# not clear unresolved because pending-key recovery and later subsystem errors
+# intentionally remain visible for operator review.
 echo "0" > "$PNDIR/boot_count" 2>/dev/null
 rm -f "$PNDIR/autorecovery_active" "$PNDIR/auto_unpatch_requested"
 
@@ -130,8 +185,6 @@ for kpm in "$KPM_DIR"/*.kpm "$KPM_DIR"/*.ko "$KPM_DIR"/*.o; do
         fi
     fi
 
-    # The C CLI accepts `load PATH [ARGS]`; preserve the sanitized args string
-    # as one argv element rather than sending a literal option terminator.
     if [ -n "$args" ]; then
         kpatch kpm load "$kpm" "$args"
     else
@@ -146,7 +199,6 @@ for kpm in "$KPM_DIR"/*.kpm "$KPM_DIR"/*.ko "$KPM_DIR"/*.o; do
 done
 
 # 0x1100/0x1101 are rehook in Next2026 but SU grant/revoke in Public1158.
-# Never dispatch rehook merely because the numeric command exists.
 if [ -n "$REHOOK" ]; then
     if [ "$ABI_PROFILE" = "public1158" ]; then
         echo "[$(date)] rehook request ignored: unsupported and unsafe on Public1158" >> "$LOG"
