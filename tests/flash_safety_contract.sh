@@ -4,6 +4,7 @@ set -eu
 ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 PATCH="$ROOT/module/patch/boot_patch.sh"
 SAFETY="$ROOT/module/patch/flash_safety.sh"
+TRANSACTION="$ROOT/module/patch/transaction_safety.sh"
 SUPERKEY="$ROOT/module/patch/superkey_safety.sh"
 UNPATCH="$ROOT/module/patch/boot_unpatch.sh"
 EXTRACT="$ROOT/module/patch/boot_extract.sh"
@@ -36,6 +37,13 @@ grep -Fq 'patchnest_commit_superkey' "$PATCH" || fail "verified flash does not c
 for file in "$PATCH" "$UNPATCH" "$EXTRACT"; do
   grep -Fq 'flash_safety.sh' "$file" || fail "$(basename "$file") does not source flash_safety"
 done
+
+# Recovery is transaction-bound; no "newest valid backup" selector may return.
+grep -Fq -- '--restore-bound-backup' "$UNPATCH" || fail "bound-backup restore entry point missing"
+grep -Fq 'rollback_binding.json' "$UNPATCH" || fail "restore does not require rollback transaction binding"
+grep -Fq 'device_binding_sha256' "$UNPATCH" || fail "restore does not verify device identity"
+grep -Fq 'patched_image_sha256' "$UNPATCH" || fail "restore does not verify current patched bytes"
+! grep -Fq 'for manifest in' "$UNPATCH" || fail "restore still scans/selects arbitrary backup manifests"
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
@@ -80,5 +88,39 @@ patchnest_prepare_superkey "$TMP" || fail "persisted superkey reload failed"
 export_record=$(patchnest_store_export_key "$TMP/source.img") || fail "export key record failed"
 [ -f "$export_record" ] || fail "export key record missing"
 [ "$(stat -c '%a' "$export_record")" = "600" ] || fail "export key record mode is not 0600"
+
+# Commit a synthetic destructive transaction and ensure only digests/identities
+# required for exact rollback are persisted.
+PATCHNEST_ROLLBACK_BINDING_FILE="$TMP/state/rollback_binding.json"
+PATCHNEST_DEVICE_IDENTITY='unit-test-device-A'
+export PATCHNEST_ROLLBACK_BINDING_FILE PATCHNEST_DEVICE_IDENTITY
+# shellcheck disable=SC1090
+. "$TRANSACTION"
+
+BOOT_TARGET="$TMP/transaction-target.img"
+BACKUP_CANDIDATE="$TMP/boot_backup_20260808T000000Z_TEST.img"
+WORKDIR="$TMP/transaction-work"
+FLASH_TO_DEVICE=true
+export BOOT_TARGET BACKUP_CANDIDATE WORKDIR FLASH_TO_DEVICE
+mkdir -p "$WORKDIR"
+printf '%s\n' 'original boot bytes' > "$BACKUP_CANDIDATE"
+printf '%s\n' 'patched boot bytes' > "$WORKDIR/new-boot.img"
+cp "$WORKDIR/new-boot.img" "$BOOT_TARGET"
+
+patchnest_commit_superkey || fail "destructive transaction commit failed"
+[ -f "$PATCHNEST_ROLLBACK_BINDING_FILE" ] || fail "rollback transaction was not committed"
+[ "$(stat -c '%a' "$PATCHNEST_ROLLBACK_BINDING_FILE")" = "600" ] || fail "rollback binding mode is not 0600"
+
+grep -Fq '"verified_readback": true' "$PATCHNEST_ROLLBACK_BINDING_FILE" || fail "rollback binding is not readback-qualified"
+grep -Fq '"rollback_backup": "boot_backup_20260808T000000Z_TEST.img"' "$PATCHNEST_ROLLBACK_BINDING_FILE" || fail "rollback binding does not name exact backup"
+grep -Eq '"device_binding_sha256": "[0-9a-f]{64}"' "$PATCHNEST_ROLLBACK_BINDING_FILE" || fail "device digest missing"
+grep -Eq '"patched_image_sha256": "[0-9a-f]{64}"' "$PATCHNEST_ROLLBACK_BINDING_FILE" || fail "patched digest missing"
+grep -Eq '"patched_image_size": [1-9][0-9]*' "$PATCHNEST_ROLLBACK_BINDING_FILE" || fail "patched byte range missing"
+
+binding_a=$(patchnest_device_binding_sha256)
+PATCHNEST_DEVICE_IDENTITY='unit-test-device-B'
+export PATCHNEST_DEVICE_IDENTITY
+binding_b=$(patchnest_device_binding_sha256)
+[ "$binding_a" != "$binding_b" ] || fail "device binding does not distinguish device identity"
 
 echo "flash safety contract: PASS"
