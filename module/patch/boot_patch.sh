@@ -3,12 +3,7 @@
 # PatchNest Boot Image Patcher
 # Transactional/fail-closed patch path derived from the APatch patching flow.
 #######################################################################################
-#
-# Usage:
-#   boot_patch.sh <bootimage> <true|false> [ARGS_PASS_TO_KPTOOLS]
-#
-# The second argument controls whether the generated image is flashed to the target.
-# When false, the validated patched image is copied to Download only.
+# Usage: boot_patch.sh <bootimage> <true|false> [ARGS_PASS_TO_KPTOOLS]
 #######################################################################################
 
 MODPATH=${0%/*}
@@ -23,6 +18,8 @@ INVOCATION_CWD=$(pwd)
 . "$MODPATH/flash_safety.sh"
 # shellcheck disable=SC1091
 . "$MODPATH/superkey_safety.sh"
+# shellcheck disable=SC1091
+. "$MODPATH/transactional_flash.sh"
 
 BOOTIMAGE=${1:-}
 FLASH_TO_DEVICE=${2:-}
@@ -43,11 +40,16 @@ command -v kptools >/dev/null 2>&1 || { >&2 echo "! Command kptools not found"; 
 command -v sha256sum >/dev/null 2>&1 || { >&2 echo "! Command sha256sum not found"; exit 1; }
 command -v xxd >/dev/null 2>&1 || { >&2 echo "! Command xxd not found"; exit 1; }
 
+# Never establish a new baseline while a previous destructive transaction is
+# unresolved. This is intentionally checked before backup capture or key work.
+if patchnest_has_unfinished_transaction; then
+  >&2 echo "! An unfinished PatchNest flash transaction exists"
+  >&2 echo "! Resolve recovery state before patching again"
+  exit 1
+fi
+
 KPIMG_SOURCE="$MODULE_DIR/bin/kpimg"
-[ -s "$KPIMG_SOURCE" ] || {
-  # Compatibility with older callers that staged kpimg in their cwd.
-  KPIMG_SOURCE="$INVOCATION_CWD/kpimg"
-}
+[ -s "$KPIMG_SOURCE" ] || KPIMG_SOURCE="$INVOCATION_CWD/kpimg"
 [ -s "$KPIMG_SOURCE" ] || { >&2 echo "! kpimg missing or empty"; exit 1; }
 
 WORKDIR=$(mktemp -d /data/local/tmp/patchnest_patch.XXXXXX) || {
@@ -99,41 +101,28 @@ validate_boot_image() {
 
 write_verified_backup() {
   mkdir -p "$BACKUP_DIR" || return 1
-
   _pn_stamp=$(date -u +%Y%m%dT%H%M%SZ 2>/dev/null || date +%Y%m%dT%H%M%S)
   BACKUP_CANDIDATE=$(mktemp "$BACKUP_DIR/boot_backup_${_pn_stamp}_XXXXXX.img") || return 1
   MANIFEST_CANDIDATE="${BACKUP_CANDIDATE%.img}.json"
 
   echo "- Capturing rollback image from $BOOT_TARGET"
-  if ! cat "$BOOT_TARGET" > "$BACKUP_CANDIDATE"; then
-    >&2 echo "! Failed to capture boot backup"
-    return 1
-  fi
+  cat "$BOOT_TARGET" > "$BACKUP_CANDIDATE" || return 1
   sync
-  [ -s "$BACKUP_CANDIDATE" ] || { >&2 echo "! Captured backup is empty"; return 1; }
-
-  if ! validate_boot_image "$BACKUP_CANDIDATE"; then
+  [ -s "$BACKUP_CANDIDATE" ] || return 1
+  validate_boot_image "$BACKUP_CANDIDATE" || {
     >&2 echo "! Backup validation failed; refusing to patch"
     return 1
-  fi
+  }
 
-  _pn_target_sha=$(hash_path "$BOOT_TARGET") || {
-    >&2 echo "! Cannot hash current boot target"
-    return 1
-  }
-  _pn_backup_sha=$(hash_path "$BACKUP_CANDIDATE") || {
-    >&2 echo "! Cannot hash captured backup"
-    return 1
-  }
+  _pn_target_sha=$(hash_path "$BOOT_TARGET") || return 1
+  _pn_backup_sha=$(hash_path "$BACKUP_CANDIDATE") || return 1
   [ "$_pn_target_sha" = "$_pn_backup_sha" ] || {
     >&2 echo "! Backup digest differs from current target"
-    >&2 echo "! target=$_pn_target_sha backup=$_pn_backup_sha"
     return 1
   }
 
   _pn_backup_size=$(wc -c < "$BACKUP_CANDIDATE" 2>/dev/null | tr -d ' ')
   printf '%s' "$_pn_backup_size" | grep -Eq '^[1-9][0-9]*$' || return 1
-
   _pn_kp_state="stock"
   if kptools -i "$WORKDIR/kernel" -l 2>/dev/null | grep -q 'patched=true'; then
     _pn_kp_state="patched"
@@ -144,7 +133,6 @@ write_verified_backup() {
     _pn_magisk=$(magisk --version 2>/dev/null | head -n 1 | cut -d: -f1)
     [ -n "$_pn_magisk" ] || _pn_magisk="null"
   fi
-
   _pn_ksu="null"
   if command -v ksu >/dev/null 2>&1; then
     _pn_ksu=$(ksu --version 2>/dev/null | head -n 1 | tr -d '\r\n')
@@ -176,7 +164,6 @@ EOF
   BACKUP_COMMITTED=1
   echo "- Verified rollback backup: $BACKUP_CANDIDATE"
   echo "- Backup digest: $_pn_backup_sha"
-  return 0
 }
 
 validate_embedded_kpms() {
@@ -189,34 +176,25 @@ validate_embedded_kpms() {
         *) >&2 echo "! Embedded KPM path must be absolute: $_pn_kpm"; return 1 ;;
       esac
       [ -f "$_pn_kpm" ] || { >&2 echo "! Embedded KPM not found: $_pn_kpm"; return 1; }
-
-      _pn_magic=$(xxd -l 4 -p "$_pn_kpm" 2>/dev/null)
-      [ "$_pn_magic" = "7f454c46" ] || {
-        >&2 echo "! Embedded KPM is not ELF: $_pn_kpm"
-        return 1
+      [ "$(xxd -l 4 -p "$_pn_kpm" 2>/dev/null)" = "7f454c46" ] || {
+        >&2 echo "! Embedded KPM is not ELF: $_pn_kpm"; return 1;
       }
-
       _pn_machine=$(xxd -s 18 -l 2 -e "$_pn_kpm" 2>/dev/null | awk '{print $2}')
       [ "$_pn_machine" = "000000b7" ] || {
-        >&2 echo "! Embedded KPM is not AArch64: $_pn_kpm"
-        return 1
+        >&2 echo "! Embedded KPM is not AArch64: $_pn_kpm"; return 1;
       }
-
       _pn_meta=$(kptools -l -M "$_pn_kpm" 2>/dev/null) || {
-        >&2 echo "! kptools cannot validate embedded KPM: $_pn_kpm"
-        return 1
+        >&2 echo "! kptools cannot validate embedded KPM: $_pn_kpm"; return 1;
       }
       _pn_name=$(printf '%s\n' "$_pn_meta" | sed -n 's/^name=//p' | head -n 1)
       [ -n "$_pn_name" ] || {
-        >&2 echo "! Embedded KPM metadata has no name: $_pn_kpm"
-        return 1
+        >&2 echo "! Embedded KPM metadata has no name: $_pn_kpm"; return 1;
       }
       echo "  - verified embedded KPM: $_pn_name"
     fi
     _pn_prev=$_pn_arg
   done
   [ "$_pn_prev" != "-M" ] || { >&2 echo "! -M requires a KPM file"; return 1; }
-  return 0
 }
 
 write_flash_receipt() {
@@ -226,6 +204,7 @@ write_flash_receipt() {
   _pn_time=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date +%Y-%m-%dT%H:%M:%S)
   _pn_key_sha=$(patchnest_superkey_sha256) || return 1
   mkdir -p "$PNDIR" || return 1
+  umask 077
   cat > "$PNDIR/last_flash.json.tmp" <<EOF
 {
   "boot_target": "$(json_escape "$BOOT_TARGET")",
@@ -236,6 +215,7 @@ write_flash_receipt() {
   "flashed_at": "$(json_escape "$_pn_time")"
 }
 EOF
+  chmod 0600 "$PNDIR/last_flash.json.tmp" || return 1
   mv "$PNDIR/last_flash.json.tmp" "$PNDIR/last_flash.json"
 }
 
@@ -243,16 +223,13 @@ cd "$WORKDIR" || exit 1
 cp "$KPIMG_SOURCE" "$WORKDIR/kpimg" || { >&2 echo "! Failed to stage kpimg"; exit 1; }
 [ -s "$WORKDIR/kpimg" ] || { >&2 echo "! Staged kpimg is empty"; exit 1; }
 
-# Public1158 KPM management is superkey-authenticated. Prepare a key before
-# building the image, but do not persist a newly generated key until a device
-# write has passed exact-range readback verification.
+# Key generation remains private to this operation until every image/KPM check
+# has passed. A persistent pending key is created only immediately before the
+# first destructive target write.
 patchnest_prepare_superkey "$WORKDIR" || exit 1
 
 echo "- Unpacking current boot image into private workspace"
-if ! magiskboot unpack "$BOOT_TARGET" >/dev/null 2>&1; then
-  >&2 echo "! Unpack failed"
-  exit 1
-fi
+magiskboot unpack "$BOOT_TARGET" >/dev/null 2>&1 || { >&2 echo "! Unpack failed"; exit 1; }
 [ -s kernel ] || { >&2 echo "! Unpack produced no kernel"; exit 1; }
 
 if kptools -i kernel -f 2>/dev/null | grep -q 'CONFIG_KPM=y'; then
@@ -264,71 +241,63 @@ if ! kptools -i kernel -f 2>/dev/null | grep -q 'CONFIG_KALLSYMS_ALL=y'; then
   exit 1
 fi
 
-echo "- Validating embedded KPM arguments"
 validate_embedded_kpms "$@" || exit 1
 
-# A destructive device write always receives a fresh, target-bound rollback
-# snapshot. This avoids stale/newest-by-time recovery ambiguity entirely.
 if [ "$FLASH_TO_DEVICE" = "true" ]; then
   write_verified_backup || exit 1
 fi
 
 mv kernel kernel.ori
-
 echo "- Patching kernel"
-if ! kptools -p -i kernel.ori -k kpimg -s "$PATCHNEST_SUPERKEY" -o kernel "$@"; then
-  >&2 echo "! Kernel patch failed"
-  exit 1
-fi
+kptools -p -i kernel.ori -k kpimg -s "$PATCHNEST_SUPERKEY" -o kernel "$@" || {
+  >&2 echo "! Kernel patch failed"; exit 1;
+}
 [ -s kernel ] || { >&2 echo "! kptools produced an empty kernel"; exit 1; }
 
 echo "- Repacking boot image"
-if ! magiskboot repack "$BOOT_TARGET" >/dev/null 2>&1; then
-  >&2 echo "! Repack failed"
-  exit 1
-fi
+magiskboot repack "$BOOT_TARGET" >/dev/null 2>&1 || { >&2 echo "! Repack failed"; exit 1; }
 [ -s new-boot.img ] || { >&2 echo "! Repack produced no new-boot.img"; exit 1; }
-
-# Validate the complete repacked boot image before either flashing or exporting it.
-echo "- Validating repacked boot image"
-if ! validate_boot_image "$WORKDIR/new-boot.img"; then
-  >&2 echo "! Repacked boot image failed validation"
-  exit 1
-fi
+validate_boot_image "$WORKDIR/new-boot.img" || {
+  >&2 echo "! Repacked boot image failed validation"; exit 1;
+}
 
 if [ "$FLASH_TO_DEVICE" = "true" ]; then
-  echo "- Flashing with mandatory SHA-256 readback verification"
-  flash_image "$WORKDIR/new-boot.img" "$BOOT_TARGET"
-  _pn_rc=$?
-  if [ "$_pn_rc" -ne 0 ]; then
-    >&2 echo "! Flash/readback verification failed: $_pn_rc"
+  # Persist the candidate credential only now, immediately adjacent to the
+  # destructive transaction. No earlier validation failure can leave it behind.
+  patchnest_stage_superkey_for_flash || {
+    >&2 echo "! Could not stage Public1158 credential for destructive write"
+    exit 1
+  }
+
+  echo "- Flashing through destructive transaction + verified rollback guard"
+  patchnest_transactional_flash "$WORKDIR/new-boot.img" "$BOOT_TARGET" "$BACKUP_CANDIDATE"
+  _pn_tx_rc=$?
+  if [ "$_pn_tx_rc" -ne 0 ]; then
+    >&2 echo "! Patch transaction failed: $_pn_tx_rc"
     save_image_to_storage "$WORKDIR/new-boot.img" || true
+    case "$_pn_tx_rc" in
+      21|23) touch "$MODULE_DIR/unresolved" ;;
+    esac
     exit 1
   fi
 
   if ! patchnest_commit_superkey; then
-    >&2 echo "! Patched image verified, but superkey persistence failed"
-    >&2 echo "! Rolling back to the verified pre-write boot image"
-    flash_image "$BACKUP_CANDIDATE" "$BOOT_TARGET"
-    _pn_rollback_rc=$?
-    if [ "$_pn_rollback_rc" -ne 0 ]; then
-      >&2 echo "! CRITICAL: automatic rollback failed: $_pn_rollback_rc"
-      >&2 echo "! Verified recovery image remains at: $BACKUP_CANDIDATE"
-    else
-      echo "- Rollback verified after superkey persistence failure"
+    >&2 echo "! Boot write verified, but credential/binding commit failed"
+    if ! patchnest_rollback_after_commit_failure "$BOOT_TARGET" "$BACKUP_CANDIDATE"; then
+      touch "$MODULE_DIR/unresolved"
     fi
     exit 1
   fi
 
   if ! write_flash_receipt "$WORKDIR/new-boot.img"; then
-    >&2 echo "! Flash and superkey commit succeeded, but receipt creation failed"
+    >&2 echo "! Flash committed safely, but evidence receipt creation failed"
+    touch "$MODULE_DIR/unresolved"
     exit 1
   fi
-  echo "- Successfully flashed, read back, and committed Public1158 credentials"
+  echo "- Successfully flashed, read back, and committed Public1158 transaction"
 else
   _pn_export_key=$(patchnest_store_export_key "$WORKDIR/new-boot.img") || {
-    >&2 echo "! Could not store root-only credential record for exported image"
-    exit 1
+    >&2 echo "! Could not store root-only credential record for exported image"; exit 1;
   }
   save_image_to_storage "$WORKDIR/new-boot.img" || exit 1
   echo "- Successfully patched and validated"
