@@ -5,6 +5,7 @@
 PATCHNEST_ROLLBACK_BINDING_FILE="${PATCHNEST_ROLLBACK_BINDING_FILE:-/data/adb/patchnest/rollback_binding.json}"
 PATCHNEST_PENDING_TRANSACTION_FILE="${PATCHNEST_PENDING_TRANSACTION_FILE:-/data/adb/patchnest/transaction.pending.json}"
 PATCHNEST_RECOVERY_REQUIRED_FILE="${PATCHNEST_RECOVERY_REQUIRED_FILE:-/data/adb/patchnest/flash_recovery_required}"
+PATCHNEST_BACKUP_DIR="${PATCHNEST_BACKUP_DIR:-/data/adb/patchnest/backup}"
 
 patchnest_json_escape() {
     printf '%s' "$1" | tr -d '\000-\037' | sed 's/\\/\\\\/g; s/"/\\"/g'
@@ -65,9 +66,7 @@ patchnest_hash_prefix() {
     printf '%s' "$_pn_size" | grep -Eq '^[1-9][0-9]*$' || return 1
     _pn_blocks=$(((_pn_size + 1048575) / 1048576))
     _pn_digest=$(dd if="$_pn_target" bs=1048576 count="$_pn_blocks" 2>/dev/null \
-        | head -c "$_pn_size" \
-        | sha256sum \
-        | awk '{print $1}')
+        | head -c "$_pn_size" | sha256sum | awk '{print $1}')
     printf '%s' "$_pn_digest" | grep -Eq '^[0-9a-f]{64}$' || return 1
     printf '%s\n' "$_pn_digest"
 }
@@ -86,7 +85,6 @@ patchnest_device_binding_sha256() {
         _pn_slot=$(getprop ro.boot.slot_suffix 2>/dev/null | tr -d '\r\n')
         _pn_identity="$_pn_serial|$_pn_product|$_pn_vbmeta|$_pn_slot"
     fi
-
     _pn_digest=$(printf '%s' "$_pn_identity|$_pn_bind_target" | sha256sum | awk '{print $1}')
     printf '%s' "$_pn_digest" | grep -Eq '^[0-9a-f]{64}$' || return 1
     printf '%s\n' "$_pn_digest"
@@ -123,7 +121,6 @@ patchnest_stage_pending_transaction() {
     _pn_source=$1
     _pn_target=$2
     _pn_backup=$3
-
     [ ! -e "$PATCHNEST_PENDING_TRANSACTION_FILE" ] || return 1
     [ ! -e "$PATCHNEST_RECOVERY_REQUIRED_FILE" ] || return 1
     [ -f "$_pn_source" ] || return 1
@@ -136,15 +133,9 @@ patchnest_stage_pending_transaction() {
     _pn_device_sha=$(patchnest_device_binding_sha256 "$_pn_target") || return 1
     _pn_key_sha=$(patchnest_superkey_sha256 2>/dev/null) || return 1
     _pn_backup_name=$(basename "$_pn_backup")
-
     printf '%s' "$_pn_source_size" | grep -Eq '^[1-9][0-9]*$' || return 1
-    case "$_pn_backup_name" in
-        boot_backup_*.img) ;;
-        *) return 1 ;;
-    esac
-    case "$_pn_backup_name" in
-        */*|*..*) return 1 ;;
-    esac
+    case "$_pn_backup_name" in boot_backup_*.img) ;; *) return 1 ;; esac
+    case "$_pn_backup_name" in */*|*..*) return 1 ;; esac
 
     _pn_dir=${PATCHNEST_PENDING_TRANSACTION_FILE%/*}
     mkdir -p "$_pn_dir" || return 1
@@ -172,7 +163,6 @@ EOF
 patchnest_mark_pending_transaction_written() {
     patchnest_state_file_is_secure "$PATCHNEST_PENDING_TRANSACTION_FILE" || return 1
     [ "$(patchnest_json_string state "$PATCHNEST_PENDING_TRANSACTION_FILE")" = "prepared" ] || return 1
-
     _pn_target=$(patchnest_json_string boot_target "$PATCHNEST_PENDING_TRANSACTION_FILE")
     _pn_sha=$(patchnest_json_string patched_image_sha256 "$PATCHNEST_PENDING_TRANSACTION_FILE")
     _pn_size=$(patchnest_json_number patched_image_size "$PATCHNEST_PENDING_TRANSACTION_FILE")
@@ -192,7 +182,6 @@ patchnest_pending_transaction_matches_written_key() {
     _pn_key=$1
     patchnest_state_file_is_secure "$PATCHNEST_PENDING_TRANSACTION_FILE" || return 1
     [ "$(patchnest_json_string state "$PATCHNEST_PENDING_TRANSACTION_FILE")" = "written" ] || return 1
-
     _pn_target=$(patchnest_json_string boot_target "$PATCHNEST_PENDING_TRANSACTION_FILE")
     _pn_device=$(patchnest_json_string device_binding_sha256 "$PATCHNEST_PENDING_TRANSACTION_FILE")
     _pn_sha=$(patchnest_json_string patched_image_sha256 "$PATCHNEST_PENDING_TRANSACTION_FILE")
@@ -201,13 +190,46 @@ patchnest_pending_transaction_matches_written_key() {
     [ -e "$_pn_target" ] || return 1
     printf '%s' "$_pn_device$_pn_sha$_pn_key_sha" | grep -Eq '^[0-9a-f]{192}$' || return 1
     printf '%s' "$_pn_size" | grep -Eq '^[1-9][0-9]*$' || return 1
-
     _pn_actual_key=$(printf '%s' "$_pn_key" | sha256sum | awk '{print $1}')
     [ "$_pn_actual_key" = "$_pn_key_sha" ] || return 1
     _pn_actual_device=$(patchnest_device_binding_sha256 "$_pn_target") || return 1
     [ "$_pn_actual_device" = "$_pn_device" ] || return 1
     _pn_actual_sha=$(patchnest_hash_prefix "$_pn_target" "$_pn_size") || return 1
     [ "$_pn_actual_sha" = "$_pn_sha" ]
+}
+
+patchnest_write_binding_record() {
+    _pn_target=$1
+    _pn_device_sha=$2
+    _pn_backup_name=$3
+    _pn_backup_sha=$4
+    _pn_patched_sha=$5
+    _pn_patched_size=$6
+    _pn_key_sha=$7
+    _pn_recovered=${8:-false}
+
+    _pn_dir=${PATCHNEST_ROLLBACK_BINDING_FILE%/*}
+    mkdir -p "$_pn_dir" || return 1
+    umask 077
+    _pn_tmp="${PATCHNEST_ROLLBACK_BINDING_FILE}.tmp.$$"
+    cat > "$_pn_tmp" <<EOF
+{
+  "schema": 2,
+  "boot_target": "$(patchnest_json_escape "$_pn_target")",
+  "device_binding_sha256": "$_pn_device_sha",
+  "rollback_backup": "$(patchnest_json_escape "$_pn_backup_name")",
+  "rollback_backup_sha256": "$_pn_backup_sha",
+  "patched_image_sha256": "$_pn_patched_sha",
+  "patched_image_size": $_pn_patched_size,
+  "superkey_sha256": "$_pn_key_sha",
+  "verified_readback": true,
+  "recovered_from_pending": $_pn_recovered,
+  "committed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date +%Y-%m-%dT%H:%M:%S)"
+}
+EOF
+    chmod 0600 "$_pn_tmp" || { rm -f "$_pn_tmp"; return 1; }
+    mv -f "$_pn_tmp" "$PATCHNEST_ROLLBACK_BINDING_FILE" || { rm -f "$_pn_tmp"; return 1; }
+    patchnest_state_file_is_secure "$PATCHNEST_ROLLBACK_BINDING_FILE"
 }
 
 patchnest_commit_rollback_binding() {
@@ -218,14 +240,8 @@ patchnest_commit_rollback_binding() {
     [ -f "$WORKDIR/new-boot.img" ] || return 1
 
     _pn_backup_name=$(basename "$BACKUP_CANDIDATE")
-    case "$_pn_backup_name" in
-        boot_backup_*.img) ;;
-        *) return 1 ;;
-    esac
-    case "$_pn_backup_name" in
-        */*|*..*) return 1 ;;
-    esac
-
+    case "$_pn_backup_name" in boot_backup_*.img) ;; *) return 1 ;; esac
+    case "$_pn_backup_name" in */*|*..*) return 1 ;; esac
     _pn_backup_sha=$(patchnest_hash_file "$BACKUP_CANDIDATE") || return 1
     _pn_patched_sha=$(patchnest_hash_file "$WORKDIR/new-boot.img") || return 1
     _pn_patched_size=$(stat -c '%s' "$WORKDIR/new-boot.img" 2>/dev/null)
@@ -233,37 +249,51 @@ patchnest_commit_rollback_binding() {
     _pn_key_sha=$(patchnest_superkey_sha256 2>/dev/null) || return 1
     printf '%s' "$_pn_patched_size" | grep -Eq '^[1-9][0-9]*$' || return 1
 
-    if [ -e "$PATCHNEST_PENDING_TRANSACTION_FILE" ]; then
+    if [ "${FLASH_TO_DEVICE:-false}" = "true" ]; then
         patchnest_state_file_is_secure "$PATCHNEST_PENDING_TRANSACTION_FILE" || return 1
         [ "$(patchnest_json_string state "$PATCHNEST_PENDING_TRANSACTION_FILE")" = "written" ] || return 1
         [ "$(patchnest_json_string boot_target "$PATCHNEST_PENDING_TRANSACTION_FILE")" = "$BOOT_TARGET" ] || return 1
+        [ "$(patchnest_json_string device_binding_sha256 "$PATCHNEST_PENDING_TRANSACTION_FILE")" = "$_pn_device_sha" ] || return 1
         [ "$(patchnest_json_string rollback_backup_sha256 "$PATCHNEST_PENDING_TRANSACTION_FILE")" = "$_pn_backup_sha" ] || return 1
         [ "$(patchnest_json_string patched_image_sha256 "$PATCHNEST_PENDING_TRANSACTION_FILE")" = "$_pn_patched_sha" ] || return 1
+        [ "$(patchnest_json_number patched_image_size "$PATCHNEST_PENDING_TRANSACTION_FILE")" = "$_pn_patched_size" ] || return 1
         [ "$(patchnest_json_string superkey_sha256 "$PATCHNEST_PENDING_TRANSACTION_FILE")" = "$_pn_key_sha" ] || return 1
     fi
 
-    _pn_when=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date +%Y-%m-%dT%H:%M:%S)
-    _pn_dir=${PATCHNEST_ROLLBACK_BINDING_FILE%/*}
-    mkdir -p "$_pn_dir" || return 1
-    umask 077
-    _pn_tmp="${PATCHNEST_ROLLBACK_BINDING_FILE}.tmp.$$"
-    cat > "$_pn_tmp" <<EOF
-{
-  "schema": 2,
-  "boot_target": "$(patchnest_json_escape "$BOOT_TARGET")",
-  "device_binding_sha256": "$_pn_device_sha",
-  "rollback_backup": "$(patchnest_json_escape "$_pn_backup_name")",
-  "rollback_backup_sha256": "$_pn_backup_sha",
-  "patched_image_sha256": "$_pn_patched_sha",
-  "patched_image_size": $_pn_patched_size,
-  "superkey_sha256": "$_pn_key_sha",
-  "verified_readback": true,
-  "committed_at": "$_pn_when"
+    patchnest_write_binding_record "$BOOT_TARGET" "$_pn_device_sha" "$_pn_backup_name" \
+        "$_pn_backup_sha" "$_pn_patched_sha" "$_pn_patched_size" "$_pn_key_sha" false || return 1
+    if [ "${FLASH_TO_DEVICE:-false}" = "true" ] && ! patchnest_clear_pending_transaction; then
+        rm -f "$PATCHNEST_ROLLBACK_BINDING_FILE"
+        return 1
+    fi
+    patchnest_clear_recovery_required || true
+    return 0
 }
-EOF
-    chmod 0600 "$_pn_tmp" || { rm -f "$_pn_tmp"; return 1; }
-    mv -f "$_pn_tmp" "$PATCHNEST_ROLLBACK_BINDING_FILE" || { rm -f "$_pn_tmp"; return 1; }
 
+# Complete the crash window after service.sh has proven that the pending key
+# authenticates the running Public1158 kernel and that the pending transaction's
+# exact patched bytes/device identity still match. This rebuilds rollback
+# authorization without needing the vanished private patch workspace.
+patchnest_commit_binding_from_pending_written() {
+    _pn_key=$1
+    patchnest_pending_transaction_matches_written_key "$_pn_key" || return 1
+
+    _pn_target=$(patchnest_json_string boot_target "$PATCHNEST_PENDING_TRANSACTION_FILE")
+    _pn_device=$(patchnest_json_string device_binding_sha256 "$PATCHNEST_PENDING_TRANSACTION_FILE")
+    _pn_backup_name=$(patchnest_json_string rollback_backup "$PATCHNEST_PENDING_TRANSACTION_FILE")
+    _pn_backup_sha=$(patchnest_json_string rollback_backup_sha256 "$PATCHNEST_PENDING_TRANSACTION_FILE")
+    _pn_patched_sha=$(patchnest_json_string patched_image_sha256 "$PATCHNEST_PENDING_TRANSACTION_FILE")
+    _pn_patched_size=$(patchnest_json_number patched_image_size "$PATCHNEST_PENDING_TRANSACTION_FILE")
+    _pn_key_sha=$(patchnest_json_string superkey_sha256 "$PATCHNEST_PENDING_TRANSACTION_FILE")
+    case "$_pn_backup_name" in boot_backup_*.img) ;; *) return 1 ;; esac
+    case "$_pn_backup_name" in */*|*..*) return 1 ;; esac
+
+    _pn_backup="$PATCHNEST_BACKUP_DIR/$_pn_backup_name"
+    [ -f "$_pn_backup" ] || return 1
+    [ "$(patchnest_hash_file "$_pn_backup")" = "$_pn_backup_sha" ] || return 1
+
+    patchnest_write_binding_record "$_pn_target" "$_pn_device" "$_pn_backup_name" \
+        "$_pn_backup_sha" "$_pn_patched_sha" "$_pn_patched_size" "$_pn_key_sha" true || return 1
     if ! patchnest_clear_pending_transaction; then
         rm -f "$PATCHNEST_ROLLBACK_BINDING_FILE"
         return 1
