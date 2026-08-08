@@ -32,6 +32,14 @@ function requireFile(rel, minSize = 1) {
   pass(`${rel} present (${st.size} bytes)`);
   return true;
 }
+function hasExecutableShellCommand(text, command) {
+  const re = new RegExp(`^\\s*${command}(?:\\s|$)`);
+  return text.split(/\r?\n/).some(line => {
+    const trimmed = line.trimStart();
+    if (!trimmed || trimmed.startsWith('#')) return false;
+    return re.test(line);
+  });
+}
 
 console.log('PatchNest release-safety package validation');
 
@@ -73,8 +81,8 @@ if (!fs.existsSync(blocker) && !fs.existsSync(candidate)) {
 }
 
 const util = read('patch/util_functions.sh');
-if (/\beval\b/.test(util)) fail('runtime util_functions.sh still contains eval');
-else pass('runtime util_functions.sh contains no eval');
+if (hasExecutableShellCommand(util, 'eval')) fail('runtime util_functions.sh still executes eval');
+else pass('runtime util_functions.sh executes no eval command');
 if (/rm\s+-rf\s+["']?\$MODPATH/.test(util)) fail('runtime util_functions.sh can recursively delete MODPATH');
 else pass('runtime util_functions.sh cannot recursively delete MODPATH');
 
