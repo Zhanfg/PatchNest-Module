@@ -12,6 +12,8 @@ if [ -n "${MODPATH:-}" ] && [ -f "$MODPATH/transaction_safety.sh" ]; then
 fi
 
 # No eval: supported Magisk/APatch config keys are assigned explicitly.
+# Do not call the upstream util_functions.sh abort() here: that helper removes
+# $MODPATH, which is the installed patch-helper directory in these entry points.
 getvar() {
   _pn_key=$1
   _pn_proppath='/data/.magisk /cache/.magisk'
@@ -22,23 +24,29 @@ getvar() {
     KEEPVERITY) KEEPVERITY=$_pn_value ;;
     KEEPFORCEENCRYPT) KEEPFORCEENCRYPT=$_pn_value ;;
     RECOVERYMODE) RECOVERYMODE=$_pn_value ;;
-    *) abort "! getvar: unsupported key '$_pn_key'" ;;
+    *) >&2 echo "! getvar: unsupported key '$_pn_key'"; return 1 ;;
   esac
 }
 
 # Resolve only a real boot partition. vendor_boot/init_boot are not generic
 # substitutes and are intentionally excluded until they have their own patch
-# implementation and validation matrix.
+# implementation and validation matrix. Resolution failures must return
+# normally instead of invoking util_functions.sh abort(), because that upstream
+# abort removes $MODPATH and would destroy the recovery helpers precisely when
+# target discovery fails.
 find_boot_image() {
   BOOTIMAGE=''
 
   if [ -n "${SLOT:-}" ]; then
     case "$SLOT" in
       _a|_b) ;;
-      *) abort "! Invalid active slot suffix: '$SLOT'" ;;
+      *) >&2 echo "! Invalid active slot suffix: '$SLOT'"; return 1 ;;
     esac
     BOOTIMAGE=$(find_block "boot$SLOT" "kern$SLOT" "kern-$SLOT" 2>/dev/null)
-    [ -n "$BOOTIMAGE" ] || abort "! Cannot resolve boot partition for active slot $SLOT"
+    [ -n "$BOOTIMAGE" ] || {
+      >&2 echo "! Cannot resolve boot partition for active slot $SLOT"
+      return 1
+    }
     echo "BOOTIMAGE=$BOOTIMAGE"
     return 0
   fi
@@ -48,7 +56,8 @@ find_boot_image() {
   _pn_boot_a=$(find_block boot_a kern_a kern-a 2>/dev/null || true)
   _pn_boot_b=$(find_block boot_b kern_b kern-b 2>/dev/null || true)
   if [ -n "$_pn_boot_a" ] || [ -n "$_pn_boot_b" ]; then
-    abort "! A/B boot partitions detected but active slot is unresolved"
+    >&2 echo "! A/B boot partitions detected but active slot is unresolved"
+    return 1
   fi
 
   BOOTIMAGE=$(find_block boot android_boot kernel bootimg lnx 2>/dev/null || true)
@@ -59,7 +68,10 @@ find_boot_image() {
       | head -n 1)
   fi
 
-  [ -n "$BOOTIMAGE" ] || abort "! Cannot resolve a supported boot partition"
+  [ -n "$BOOTIMAGE" ] || {
+    >&2 echo "! Cannot resolve a supported boot partition"
+    return 1
+  }
   echo "BOOTIMAGE=$BOOTIMAGE"
 }
 
