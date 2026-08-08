@@ -8,20 +8,26 @@ on:
     branches: [main]
     paths:
       - 'module/patch/**'
+      - 'module/service.sh'
+      - 'version.properties'
       - 'tests/flash_safety_contract.sh'
+      - 'tests/runtime_abi_contract.sh'
       - '.github/workflows/flash-safety.yml'
   push:
     branches:
       - 'review/flash-readiness-hardening'
     paths:
       - 'module/patch/**'
+      - 'module/service.sh'
+      - 'version.properties'
       - 'tests/flash_safety_contract.sh'
+      - 'tests/runtime_abi_contract.sh'
       - '.github/workflows/flash-safety.yml'
   workflow_dispatch:
 
 jobs:
   contract:
-    name: Transactional flash contract
+    name: Transactional flash and ABI contract
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -35,11 +41,11 @@ jobs:
       - name: Shell syntax
         run: |
           set -euo pipefail
-          for file in module/patch/*.sh tests/flash_safety_contract.sh; do
+          for file in module/patch/*.sh module/service.sh tests/flash_safety_contract.sh tests/runtime_abi_contract.sh; do
             sh -n "$file"
           done
 
-      - name: ShellCheck reviewed flash path
+      - name: ShellCheck reviewed flash/runtime path
         run: |
           shellcheck -s sh -S warning \
             --exclude=SC3043,SC2034,SC2115,SC2046,SC2319,SC2155 \
@@ -48,7 +54,12 @@ jobs:
             module/patch/boot_unpatch.sh \
             module/patch/flash_safety.sh \
             module/patch/superkey_safety.sh \
-            tests/flash_safety_contract.sh
+            module/service.sh \
+            tests/flash_safety_contract.sh \
+            tests/runtime_abi_contract.sh
 
       - name: Run transactional flash contract
         run: sh tests/flash_safety_contract.sh
+
+      - name: Run runtime ABI contract
+        run: sh tests/runtime_abi_contract.sh
