@@ -72,6 +72,8 @@ for required in \
     install_kpm.sh \
     compile_kpm.sh \
     kpm_verify.sh \
+    validate_kpm_file.sh \
+    kpatch_runtime_wrapper.sh \
     device_validation.sh \
     arm_auto_recovery.sh \
     verify_auto_recovery.sh \
