@@ -34,7 +34,9 @@ ui_print "- Architecture: $ARCH"
 
 set_perm_recursive "$MODPATH/bin" 0 2000 0755 0755
 set_perm_recursive "$MODPATH/patch" 0 0 0755 0755
-[ ! -f "$MODPATH/device_validation.sh" ] || set_perm "$MODPATH/device_validation.sh" 0 0 0755
+for _pn_tool in device_validation.sh arm_auto_recovery.sh verify_auto_recovery.sh; do
+    [ ! -f "$MODPATH/$_pn_tool" ] || set_perm "$MODPATH/$_pn_tool" 0 0 0755
+done
 
 mkdir -p /data/adb/patchnest
 
@@ -59,9 +61,11 @@ fi
 if [ ! -x "$MODPATH/patch/boot_patch.sh" ] || [ ! -x "$MODPATH/patch/boot_unpatch.sh" ]; then
     abort "! PatchNest boot transaction scripts are not executable"
 fi
-if [ ! -x "$MODPATH/device_validation.sh" ]; then
-    abort "! Physical-device validation harness is missing or not executable"
-fi
+for _pn_tool in device_validation.sh arm_auto_recovery.sh verify_auto_recovery.sh; do
+    if [ ! -x "$MODPATH/$_pn_tool" ]; then
+        abort "! Required physical-validation tool missing or not executable: $_pn_tool"
+    fi
+done
 
 echo "$ROOT_MGR" > /data/adb/patchnest/root_manager
 
@@ -77,8 +81,10 @@ cp -rf "$MODPATH/webroot"/* "$MODDIR/webroot/" 2>/dev/null || true
 cp -rf "$MODPATH/bin"/* "$MODDIR/bin/" 2>/dev/null || true
 cp -rf "$MODPATH/patch"/* "$MODDIR/patch/" 2>/dev/null || true
 cp -f "$MODPATH/detect_env.sh" "$MODDIR/detect_env.sh" 2>/dev/null || true
-cp -f "$MODPATH/device_validation.sh" "$MODDIR/device_validation.sh" 2>/dev/null || true
-chmod 0755 "$MODDIR/patch"/*.sh "$MODDIR/device_validation.sh" 2>/dev/null || true
+for _pn_tool in device_validation.sh arm_auto_recovery.sh verify_auto_recovery.sh; do
+    cp -f "$MODPATH/$_pn_tool" "$MODDIR/$_pn_tool" 2>/dev/null || true
+done
+chmod 0755 "$MODDIR/patch"/*.sh "$MODDIR/device_validation.sh" "$MODDIR/arm_auto_recovery.sh" "$MODDIR/verify_auto_recovery.sh" 2>/dev/null || true
 
 ui_print "- Installation complete"
 ui_print ""
