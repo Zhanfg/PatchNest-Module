@@ -67,16 +67,22 @@ jobs:
             exit 1
           }
 
-          for key in patchnest kernelpatch magiskboot; do
+          for key in patchnest kernelpatch magiskboot patchnest_public1158_commit; do
             grep -Fq "${key}=" version.properties || {
               echo "::error::Missing version key: $key"
               exit 1
             }
           done
+
+          source_commit=$(grep -F 'patchnest_public1158_commit=' version.properties | head -n 1 | cut -d= -f2- | tr -d '"')
+          printf '%s' "$source_commit" | grep -Eq '^[0-9a-f]{40}$' || {
+            echo "::error::patchnest_public1158_commit must be an exact 40-hex commit"
+            exit 1
+          }
+
           for key in \
             kpimg_linux_0.13.3 \
             kptools_android_0.13.3 \
-            kpatch_android_0.13.5-2 \
             magisk_apk_v30.7; do
             value=$(grep -F "${key}=" version.properties | head -n 1 | cut -d= -f2-)
             printf '%s' "$value" | grep -Eq '^[0-9a-f]{64}$' || {
@@ -84,6 +90,11 @@ jobs:
               exit 1
             }
           done
+
+          if grep -q '^kpatch_android_' version.properties; then
+            echo "::error::Historical Next2026 kpatch release pin must not be used by the Public1158 module"
+            exit 1
+          fi
 
       - name: Check shell syntax
         run: |
@@ -101,7 +112,8 @@ jobs:
             module/action.sh module/status.sh module/uninstall.sh \
             module/install_kpm.sh module/compile_kpm.sh \
             module/patch/boot_patch.sh module/patch/boot_extract.sh \
-            module/patch/boot_unpatch.sh
+            module/patch/boot_unpatch.sh module/patch/flash_safety.sh \
+            module/patch/superkey_safety.sh
           shellcheck -s sh -S error module/patch/util_functions.sh || true
 
       - name: Verify locale completeness
@@ -166,12 +178,12 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y jq zip unzip file
+          sudo apt-get install -y jq zip unzip file cmake ninja-build
 
       - name: Load dependency versions
         run: |
           set -euo pipefail
-          for key in patchnest kernelpatch magiskboot; do
+          for key in patchnest kernelpatch magiskboot patchnest_public1158_commit; do
             value=$(grep -F "${key}=" version.properties | head -n 1 | cut -d= -f2- | tr -d '"')
             [ -n "$value" ] || { echo "::error::Missing $key"; exit 1; }
             echo "$key=$value" >> "$GITHUB_ENV"
@@ -186,9 +198,6 @@ jobs:
           gh release download "$kernelpatch" \
             -R Zhanfg/KernelPatch-Public \
             -p kpimg-linux -p kptools-android -D module/bin
-          gh release download "$patchnest" \
-            -R Zhanfg/PatchNest \
-            -p kpatch-android -D module/bin
           gh release download "$magiskboot" \
             -R topjohnwu/Magisk \
             -p 'Magisk*.apk' -O magisk.apk
@@ -213,20 +222,56 @@ jobs:
           }
           verify "kpimg_linux_${kernelpatch}" module/bin/kpimg-linux
           verify "kptools_android_${kernelpatch}" module/bin/kptools-android
-          verify "kpatch_android_${patchnest}" module/bin/kpatch-android
           verify "magisk_apk_${magiskboot}" magisk.apk
           exit "$fail"
 
-      - name: Prepare module binaries
+      - name: Prepare core module binaries
         run: |
           set -euo pipefail
           mv module/bin/kpimg-linux module/bin/kpimg
           mv module/bin/kptools-android module/bin/kptools
-          mv module/bin/kpatch-android module/bin/kpatch
           unzip -p magisk.apk 'lib/arm64-v8a/libmagiskboot.so' > module/bin/magiskboot
           test -s module/bin/magiskboot
           rm magisk.apk
-          chmod 0755 module/bin/kpatch module/bin/kptools module/bin/magiskboot
+          chmod 0755 module/bin/kptools module/bin/magiskboot
+
+      - name: Build pinned Public1158 userspace CLI
+        run: |
+          set -euo pipefail
+          printf '%s' "$patchnest_public1158_commit" | grep -Eq '^[0-9a-f]{40}$'
+          rm -rf /tmp/patchnest-public1158 build/public1158
+          git clone --filter=blob:none --no-checkout https://github.com/Zhanfg/PatchNest.git /tmp/patchnest-public1158
+          git -C /tmp/patchnest-public1158 fetch --depth=1 origin "$patchnest_public1158_commit"
+          git -C /tmp/patchnest-public1158 checkout --detach "$patchnest_public1158_commit"
+          test "$(git -C /tmp/patchnest-public1158 rev-parse HEAD)" = "$patchnest_public1158_commit"
+
+          cmake -S /tmp/patchnest-public1158 -B build/public1158 \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DANDROID_PLATFORM=android-33 \
+            -DANDROID_ABI=arm64-v8a
+          cmake --build build/public1158 --target kpatch-public1158 --parallel
+          cp build/public1158/kpatch-public1158 module/bin/kpatch
+          chmod 0755 module/bin/kpatch
+
+          strings module/bin/kpatch | grep -Fxq 'public1158'
+          strings module/bin/kpatch | grep -Fxq 'hello1158'
+          if strings module/bin/kpatch | grep -Fxq 'hello2026'; then
+            echo "::error::Packaged kpatch still contains Next2026 hello identity"
+            exit 1
+          fi
+
+          mkdir -p module/provenance
+          cli_sha=$(sha256sum module/bin/kpatch | awk '{print $1}')
+          cat > module/provenance/kpatch-public1158.json <<EOF
+          {
+            "profile": "public1158",
+            "sourceRepository": "Zhanfg/PatchNest",
+            "sourceCommit": "$patchnest_public1158_commit",
+            "binarySha256": "$cli_sha"
+          }
+          EOF
 
       - name: Build kp-safemode
         run: |
@@ -237,7 +282,7 @@ jobs:
             -o module/bin/kp-safemode module/tools/kp-safemode.c
           chmod 0755 module/bin/kp-safemode
 
-      - name: Verify ARM64 binaries
+      - name: Verify ARM64 binaries and ABI profile
         run: |
           set -euo pipefail
           for binary in module/bin/kpatch module/bin/kptools module/bin/kp-safemode; do
@@ -250,6 +295,9 @@ jobs:
           done
           test -s module/bin/kpimg
           test -s module/bin/magiskboot
+          jq -e '.profile == "public1158"' module/provenance/kpatch-public1158.json >/dev/null
+          test "$(jq -r '.sourceCommit' module/provenance/kpatch-public1158.json)" = "$patchnest_public1158_commit"
+          test "$(jq -r '.binarySha256' module/provenance/kpatch-public1158.json)" = "$(sha256sum module/bin/kpatch | awk '{print $1}')"
 
       - name: Build WebUI
         run: |
@@ -268,6 +316,7 @@ jobs:
           sha256sum out/PatchNest-Module.zip > out/PatchNest-Module.zip.sha256
           unzip -l out/PatchNest-Module.zip | grep -q 'module.prop'
           unzip -l out/PatchNest-Module.zip | grep -q 'webroot/index.html'
+          unzip -l out/PatchNest-Module.zip | grep -q 'provenance/kpatch-public1158.json'
 
       - name: Determine release tag
         id: release_meta
