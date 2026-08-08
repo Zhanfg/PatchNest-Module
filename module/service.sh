@@ -59,28 +59,42 @@ if [ ! -x "$MODDIR/bin/kpatch" ]; then
     exit 0
 fi
 
-# kpatch hello is the package-level ABI readiness gate. The hardened CLI now
-# returns non-zero when the syscall fails or the kernel handshake magic does
-# not match, so do not treat an empty/foreign handshake as success.
+# kpatch hello is the package-level ABI readiness gate. Capture the exact echo
+# and turn it into a capability profile; never infer mutation safety from a
+# numeric command ID shared by multiple KernelPatch families.
 retries=0
 max_retries=5
+hello_out=""
 while [ "$retries" -lt "$max_retries" ]; do
     hello_out="$(kpatch hello 2>>"$LOG")"
-    if [ $? -eq 0 ] && [ -n "$hello_out" ]; then
+    hello_rc=$?
+    if [ "$hello_rc" -eq 0 ] && [ -n "$hello_out" ]; then
         break
     fi
-    echo "[$(date)] kpatch hello attempt $((retries + 1)) failed, retrying..." >> "$LOG"
-    sleep 2
     retries=$((retries + 1))
+    echo "[$(date)] kpatch hello attempt $retries failed, retrying..." >> "$LOG"
+    sleep 2
 done
-hello_out="$(kpatch hello 2>>"$LOG")"
-if [ $? -ne 0 ] || [ -z "$hello_out" ]; then
+
+if [ "$hello_rc" -ne 0 ] || [ -z "$hello_out" ]; then
     echo "[$(date)] ERROR: kpatch/kernel ABI handshake failed after $retries retries" >> "$LOG"
-    echo "[$(date)] Refusing KPM/exclude/rehook operations; package is unresolved." >> "$LOG"
+    echo "[$(date)] Refusing KPM/exclude/rehook/event operations; package is unresolved." >> "$LOG"
     touch "$MODDIR/unresolved"
     exit 0
 fi
-echo "[$(date)] kpatch hello OK: $hello_out" >> "$LOG"
+
+case "$hello_out" in
+    hello1158) ABI_PROFILE=public1158 ;;
+    hello2026) ABI_PROFILE=next2026 ;;
+    *)
+        echo "[$(date)] ERROR: unrecognized successful hello response: $hello_out" >> "$LOG"
+        touch "$MODDIR/unresolved"
+        exit 0
+        ;;
+esac
+
+echo "[$(date)] kpatch hello OK: $hello_out profile=$ABI_PROFILE" >> "$LOG"
+printf '%s\n' "$ABI_PROFILE" > "$PNDIR/abi_profile"
 
 # Healthy userspace/kernel handshake. This only clears the userspace marker;
 # it does not claim physical boot-loop recovery has been validated.
@@ -116,9 +130,8 @@ for kpm in "$KPM_DIR"/*.kpm "$KPM_DIR"/*.ko "$KPM_DIR"/*.o; do
         fi
     fi
 
-    # The current C CLI accepts `load PATH [ARGS]`; it does not parse `--` as
-    # an option terminator. Preserve the whole sanitized args string as one
-    # argv element instead of accidentally sending literal "--" to the KPM.
+    # The C CLI accepts `load PATH [ARGS]`; preserve the sanitized args string
+    # as one argv element rather than sending a literal option terminator.
     if [ -n "$args" ]; then
         kpatch kpm load "$kpm" "$args"
     else
@@ -132,8 +145,13 @@ for kpm in "$KPM_DIR"/*.kpm "$KPM_DIR"/*.ko "$KPM_DIR"/*.o; do
     fi
 done
 
+# 0x1100/0x1101 are rehook in Next2026 but SU grant/revoke in Public1158.
+# Never dispatch rehook merely because the numeric command exists.
 if [ -n "$REHOOK" ]; then
-    if [ "$REHOOK" = "enable" ] || [ "$REHOOK" = "disable" ]; then
+    if [ "$ABI_PROFILE" = "public1158" ]; then
+        echo "[$(date)] rehook request ignored: unsupported and unsafe on Public1158" >> "$LOG"
+        rm -f "$PNDIR/rehook"
+    elif [ "$REHOOK" = "enable" ] || [ "$REHOOK" = "disable" ]; then
         if kpatch rehook "$REHOOK" >>"$LOG" 2>&1; then
             echo "[$(date)] rehook $REHOOK" >> "$LOG"
         else
@@ -147,32 +165,35 @@ fi
 
 dispatch_event() {
     event_name="$1"
-    # PatchNest's current KPatch-Next-derived CLI has no `event` command. Do
-    # not silently pretend lifecycle dispatch succeeded. A future ABI backend
-    # may expose it; until then this remains explicitly unavailable.
-    if kpatch --help 2>/dev/null | grep -q '^[[:space:]]*event[[:space:]]'; then
-        echo "[$(date)] Dispatching event: $event_name" >> "$LOG"
-        if ! kpatch event "$event_name" "" "" >>"$LOG" 2>&1; then
-            echo "[$(date)] WARN: event dispatch failed: $event_name" >> "$LOG"
-        fi
-    else
-        echo "[$(date)] Event dispatch unavailable in packaged kpatch ABI: $event_name" >> "$LOG"
+    if [ "$ABI_PROFILE" != "public1158" ]; then
+        echo "[$(date)] Event $event_name skipped: ABI $ABI_PROFILE has no reviewed event capability" >> "$LOG"
+        return 0
     fi
+
+    echo "[$(date)] Dispatching Public1158 event: $event_name" >> "$LOG"
+    if ! kpatch event "$event_name" "PatchNest" "" >>"$LOG" 2>&1; then
+        echo "[$(date)] ERROR: Public1158 event dispatch failed: $event_name" >> "$LOG"
+        touch "$MODDIR/unresolved"
+        return 1
+    fi
+    return 0
 }
 
-dispatch_event "POST_FS_DATA"
+dispatch_event "POST_FS_DATA" || true
 
 wait_count=0
 until [ "$(getprop sys.boot_completed)" = "1" ]; do
     sleep 1
     wait_count=$((wait_count + 1))
     if [ "$wait_count" -ge 300 ]; then
-        echo "[$(date)] WARN: boot_completed timeout, continuing anyway" >> "$LOG"
+        echo "[$(date)] WARN: boot_completed timeout; BOOT_COMPLETED event will not be forged" >> "$LOG"
         break
     fi
 done
 
-dispatch_event "BOOT_COMPLETED"
+if [ "$(getprop sys.boot_completed)" = "1" ]; then
+    dispatch_event "BOOT_COMPLETED" || true
+fi
 
 if [ -f "$CONFIG" ]; then
     excluded_count=0
@@ -200,6 +221,9 @@ if [ -f "$CONFIG" ]; then
     done < "$_cfg_tmp"
     rm -f "$_cfg_tmp"
     echo "[$(date)] exclusion: applied=$excluded_count failed=$excluded_failed" >> "$LOG"
+    if [ "$excluded_failed" -gt 0 ]; then
+        touch "$MODDIR/unresolved"
+    fi
 fi
 
 echo "[$(date)] service.sh completed" >> "$LOG"
