@@ -23,6 +23,7 @@ on:
       - 'tests/kpm_install_security_contract.sh'
       - 'tests/kpm_runtime_admission_contract.sh'
       - 'tests/kpm_signature_contract.sh'
+      - 'tests/kpatch_runtime_wrapper_contract.sh'
       - 'tests/installer_contract.sh'
       - 'tests/recovery_export_contract.sh'
       - 'tests/runtime_abi_contract.sh'
@@ -49,6 +50,7 @@ on:
       - 'tests/kpm_install_security_contract.sh'
       - 'tests/kpm_runtime_admission_contract.sh'
       - 'tests/kpm_signature_contract.sh'
+      - 'tests/kpatch_runtime_wrapper_contract.sh'
       - 'tests/installer_contract.sh'
       - 'tests/recovery_export_contract.sh'
       - 'tests/runtime_abi_contract.sh'
@@ -72,7 +74,7 @@ jobs:
       - name: Shell and validator syntax
         run: |
           set -euo pipefail
-          for file in module/patch/*.sh module/service.sh module/post-fs-data.sh module/customize.sh module/install_kpm.sh module/kpm_verify.sh module/uninstall.sh module/device_validation.sh module/arm_auto_recovery.sh module/verify_auto_recovery.sh module/export_recovery_boot.sh scripts/device_validation.sh scripts/package_module.sh tests/flash_safety_contract.sh tests/destructive_transaction_contract.sh tests/transaction_backup_identity_contract.sh tests/bootloop_recovery_contract.sh tests/boot_resolution_failure_contract.sh tests/candidate_prepatch_idle_contract.sh tests/fr014_preflight_contract.sh tests/fr014_write_gate_contract.sh tests/kpm_install_security_contract.sh tests/kpm_runtime_admission_contract.sh tests/kpm_signature_contract.sh tests/installer_contract.sh tests/recovery_export_contract.sh tests/runtime_abi_contract.sh; do
+          for file in module/patch/*.sh module/service.sh module/post-fs-data.sh module/customize.sh module/install_kpm.sh module/kpm_verify.sh module/validate_kpm_file.sh module/kpatch_runtime_wrapper.sh module/uninstall.sh module/device_validation.sh module/arm_auto_recovery.sh module/verify_auto_recovery.sh module/export_recovery_boot.sh scripts/device_validation.sh scripts/package_module.sh tests/flash_safety_contract.sh tests/destructive_transaction_contract.sh tests/transaction_backup_identity_contract.sh tests/bootloop_recovery_contract.sh tests/boot_resolution_failure_contract.sh tests/candidate_prepatch_idle_contract.sh tests/fr014_preflight_contract.sh tests/fr014_write_gate_contract.sh tests/kpm_install_security_contract.sh tests/kpm_runtime_admission_contract.sh tests/kpm_signature_contract.sh tests/kpatch_runtime_wrapper_contract.sh tests/installer_contract.sh tests/recovery_export_contract.sh tests/runtime_abi_contract.sh; do
             sh -n "$file"
           done
           node --check tests/validate_flash_package.js
@@ -94,6 +96,8 @@ jobs:
             module/customize.sh \
             module/install_kpm.sh \
             module/kpm_verify.sh \
+            module/validate_kpm_file.sh \
+            module/kpatch_runtime_wrapper.sh \
             module/uninstall.sh \
             module/device_validation.sh \
             module/arm_auto_recovery.sh \
@@ -112,6 +116,7 @@ jobs:
             tests/kpm_install_security_contract.sh \
             tests/kpm_runtime_admission_contract.sh \
             tests/kpm_signature_contract.sh \
+            tests/kpatch_runtime_wrapper_contract.sh \
             tests/installer_contract.sh \
             tests/recovery_export_contract.sh \
             tests/runtime_abi_contract.sh
@@ -152,6 +157,9 @@ jobs:
 
       - name: Run KPM Ed25519 signature contract
         run: sh tests/kpm_signature_contract.sh
+
+      - name: Run centralized kpatch runtime wrapper contract
+        run: sh tests/kpatch_runtime_wrapper_contract.sh
 
       - name: Run cross-manager installer contract
         run: sh tests/installer_contract.sh
