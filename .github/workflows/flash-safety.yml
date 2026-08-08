@@ -63,6 +63,8 @@ jobs:
             tests/runtime_abi_contract.sh
 
       - name: Run transactional flash contract
+        env:
+          PATCHNEST_TRANSACTION_TEST: '1'
         run: sh tests/flash_safety_contract.sh
 
       - name: Run runtime ABI contract
