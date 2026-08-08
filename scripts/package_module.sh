@@ -26,10 +26,6 @@ command -v zip >/dev/null 2>&1 || { echo "zip is required" >&2; exit 1; }
 command -v unzip >/dev/null 2>&1 || { echo "unzip is required" >&2; exit 1; }
 command -v sort >/dev/null 2>&1 || { echo "sort is required" >&2; exit 1; }
 
-# Build assembles the Android binaries/WebUI into module/ immediately before
-# packaging. When that complete tree is present, release-safety validation is a
-# mandatory pre-ZIP gate. The source-only Flash safety workflow intentionally
-# lacks these generated binaries and continues with its shell/transaction tests.
 if [ -s "$SOURCE_DIR/bin/kpatch" ] && \
    [ -s "$SOURCE_DIR/bin/kptools" ] && \
    [ -s "$SOURCE_DIR/bin/kpimg" ] && \
@@ -71,12 +67,19 @@ for required in \
     FLASH_REVIEW_BLOCKED \
     customize.sh \
     service.sh \
+    post-fs-data.sh \
+    uninstall.sh \
+    install_kpm.sh \
+    compile_kpm.sh \
+    kpm_verify.sh \
     device_validation.sh \
     arm_auto_recovery.sh \
     verify_auto_recovery.sh \
     export_recovery_boot.sh \
     patch/boot_patch.sh \
+    patch/boot_extract.sh \
     patch/boot_unpatch.sh \
+    patch/util_functions.sh \
     patch/flash_safety.sh \
     patch/transaction_safety.sh \
     patch/transactional_flash.sh \
