@@ -42,12 +42,57 @@ validate_archive_entries() {
     _pn_list=$2
     unzip -Z1 "$_pn_zip" > "$_pn_list" 2>/dev/null || return 1
     [ -s "$_pn_list" ] || return 1
+
+    # Duplicate names create parser/extractor ambiguity; reject them before any
+    # materialization. Entry names are deliberately conservative because unzip
+    # treats wildcard characters as patterns even when the shell quoted them.
+    if LC_ALL=C sort "$_pn_list" | uniq -d | grep -q .; then
+        printf '%s\n' "! Duplicate ZIP entries are not allowed" >&2
+        return 1
+    fi
+
     while IFS= read -r _pn_entry || [ -n "$_pn_entry" ]; do
         [ -n "$_pn_entry" ] || return 1
         case "$_pn_entry" in
-            /*|\\*|[A-Za-z]:*|../*|*/../*|*/..|..|./*|*\\*)
+            /*|\\*|[A-Za-z]:*|../*|*/../*|*/..|..|./*|*\\*|*\**|*\?*|*\[*|*\]*)
                 printf '%s\n' "! Unsafe ZIP entry: $_pn_entry" >&2
                 return 1
+                ;;
+        esac
+        # Keep archive paths predictable and reject control/unusual characters
+        # that could make line-based ZIP listing ambiguous.
+        if ! printf '%s\n' "$_pn_entry" | LC_ALL=C grep -Eq '^[A-Za-z0-9._/@%+=, -]+/?$'; then
+            printf '%s\n' "! Unsupported ZIP entry name: $_pn_entry" >&2
+            return 1
+        fi
+    done < "$_pn_list"
+    return 0
+}
+
+materialize_archive_regular_files() {
+    _pn_zip=$1
+    _pn_list=$2
+    _pn_root=$3
+    ensure_real_dir "$_pn_root" || return 1
+    chmod 0700 "$_pn_root" 2>/dev/null || true
+    umask 077
+
+    while IFS= read -r _pn_entry || [ -n "$_pn_entry" ]; do
+        case "$_pn_entry" in
+            */)
+                _pn_dir="$_pn_root/${_pn_entry%/}"
+                ensure_real_dir "$_pn_dir" || return 1
+                ;;
+            *)
+                _pn_dest="$_pn_root/$_pn_entry"
+                _pn_parent=${_pn_dest%/*}
+                [ "$_pn_parent" = "$_pn_dest" ] && _pn_parent=$_pn_root
+                ensure_real_dir "$_pn_parent" || return 1
+                [ ! -e "$_pn_dest" ] || return 1
+                # -p emits entry bytes to stdout; archive mode/type metadata is
+                # never allowed to create symlinks, devices, or hard links.
+                unzip -p "$_pn_zip" "$_pn_entry" > "$_pn_dest" 2>/dev/null || return 1
+                [ -f "$_pn_dest" ] && [ ! -L "$_pn_dest" ] || return 1
                 ;;
         esac
     done < "$_pn_list"
@@ -61,7 +106,6 @@ validate_kpm_binary() {
     [ -x "$MODDIR/bin/kptools" ] || return 1
 
     _pn_hdr=$(xxd -p -l 20 "$_pn_file" 2>/dev/null | tr -d '\r\n')
-    # ELF64, little-endian, AArch64 (e_machine=0x00b7 at offset 18).
     [ "$(printf '%s' "$_pn_hdr" | cut -c1-12)" = "7f454c460201" ] || return 1
     [ "$(printf '%s' "$_pn_hdr" | cut -c37-40)" = "b700" ] || return 1
 
@@ -74,9 +118,6 @@ validate_kpm_binary() {
 [ -n "$ZIP_FILE" ] || fail "Usage: install_kpm.sh <path_to_zip>" 2
 [ -f "$ZIP_FILE" ] && [ ! -L "$ZIP_FILE" ] || fail "KPM ZIP is missing, not regular, or is a symlink: $ZIP_FILE" 2
 
-# FR-014 must remain a clean boot lifecycle test. Diagnostic KPM testing uses
-# device_validation.sh kpm-cycle with its own explicit unlock instead of the
-# normal persistent installer/autoload path.
 if [ -f "$MODDIR/FR014_DEVICE_CANDIDATE" ]; then
     fail "Persistent KPM installation is disabled on the FR-014 device candidate" 3
 fi
@@ -94,14 +135,9 @@ chmod 0700 "$TMPDIR" 2>/dev/null || true
 ENTRY_LIST="$TMPDIR/archive.entries"
 
 validate_archive_entries "$ZIP_FILE" "$ENTRY_LIST" || fail "KPM ZIP contains unsafe/invalid archive entries"
-
-printf '%s\n' "- Extracting $ZIP_FILE..."
-unzip -qq -o "$ZIP_FILE" -d "$TMPDIR/extracted" || fail "Failed to extract KPM ZIP"
 EXTRACTED="$TMPDIR/extracted"
-[ -d "$EXTRACTED" ] || fail "KPM extraction produced no directory"
-if find "$EXTRACTED" -type l -print -quit 2>/dev/null | grep -q .; then
-    fail "KPM ZIP contains symlink entries"
-fi
+printf '%s\n' "- Materializing validated archive entries..."
+materialize_archive_regular_files "$ZIP_FILE" "$ENTRY_LIST" "$EXTRACTED" || fail "Safe KPM ZIP materialization failed"
 
 PROP="$EXTRACTED/module.prop"
 [ -f "$PROP" ] && [ ! -L "$PROP" ] || fail "KPM ZIP has no safe root module.prop"
@@ -133,8 +169,6 @@ esac
 [ -n "$MOD_ID" ] && [ "${#MOD_ID}" -le 64 ] && [ "$MOD_ID" != . ] && [ "$MOD_ID" != .. ] \
     || fail "Unsafe or empty KPM id: '$MOD_ID'" 2
 
-# Exactly one binary module OR one-or-more C sources. Mixed packages and
-# multi-binary ambiguity are rejected rather than choosing an arbitrary file.
 BINARY_LIST="$TMPDIR/binaries.list"
 SOURCE_LIST="$TMPDIR/sources.list"
 find "$EXTRACTED" -type f \( -name '*.kpm' -o -name '*.ko' -o -name '*.o' \) \
@@ -173,15 +207,15 @@ cp "$STAGED_KPM" "$DEST_TMP" || fail "Cannot stage KPM in persistent directory"
 chmod 0600 "$DEST_TMP" 2>/dev/null || true
 mv -f "$DEST_TMP" "$DEST_KPM" || fail "Cannot atomically commit KPM"
 
-# Never retain a signature from an older binary revision.
 rm -f "$KPM_DIR/${MOD_ID}.kpm.sig"
-KPM_BASENAME=$(basename "$(sed -n '1p' "$BINARY_LIST" 2>/dev/null || true)")
+KPM_ORIGINAL=$(sed -n '1p' "$BINARY_LIST" 2>/dev/null || true)
+KPM_BASENAME=''
+[ -z "$KPM_ORIGINAL" ] || KPM_BASENAME=$(basename "$KPM_ORIGINAL")
 if [ -n "$KPM_BASENAME" ]; then
     _kpm_stem=$(printf '%s' "$KPM_BASENAME" | sed -E 's/\.(kpm|ko|o)$//')
-    for _sig in "$EXTRACTED/${_kpm_stem}.kpm.sig" \
-                "$EXTRACTED/${_kpm_stem}.sig" \
-                "$EXTRACTED/$(basename "$KPM_BASENAME" .kpm).kpm.sig" \
-                "$EXTRACTED/$(basename "$KPM_BASENAME" .kpm).sig"; do
+    _kpm_parent=$(dirname "$KPM_ORIGINAL")
+    for _sig in "$_kpm_parent/${_kpm_stem}.kpm.sig" \
+                "$_kpm_parent/${_kpm_stem}.sig"; do
         if [ -f "$_sig" ] && [ ! -L "$_sig" ]; then
             cp "$_sig" "$KPM_DIR/${MOD_ID}.kpm.sig" || fail "Cannot install KPM signature"
             chmod 0600 "$KPM_DIR/${MOD_ID}.kpm.sig" 2>/dev/null || true
