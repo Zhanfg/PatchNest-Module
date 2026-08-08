@@ -1,115 +1,194 @@
 # PatchNest flash-readiness review
 
-Status: **NOT FLASH READY**
+Status: **NOT FLASH READY — STATIC/CODE GATES CLOSED, PHYSICAL DEVICE GATE OPEN**
 
-This document is the live release gate for `review/flash-readiness-hardening`. A green source/package CI run is necessary but is not sufficient to remove this gate.
+This document is the live release gate for `review/flash-readiness-hardening`.
+`module/FLASH_REVIEW_BLOCKED` intentionally keeps the review branch non-installable.
+Green CI is necessary but is **not** sufficient evidence for a boot-image modifying
+release.
 
-## P0 blockers
+Reviewed code/package baseline before this documentation commit:
 
-### FR-001 — Packaged kernel and CLI belong to different supercall ABI families
+`63d94f480cddf398e76cfa2ca6826e7ce3e455c4`
 
-Current `version.properties` combines:
+Verified at that baseline:
 
-- `Zhanfg/KernelPatch-Public` `0.13.3` (`hello1158`, magic `0x11581158`, key/su authentication, KPM event/safemode extensions);
-- `Zhanfg/PatchNest` `0.13.5-2`, reproduced from the KPatch-Next userspace snapshot (`hello2026`, magic `0x20262026`, NULL-key userspace call convention, no matching event command).
+- `Build` run `31233359168`: **PASS**
+  - source/release metadata validation;
+  - shell syntax + ShellCheck;
+  - WebUI tests + production build;
+  - pinned external dependency SHA-256 validation;
+  - exact-source Public1158 userspace rebuild;
+  - ARM64 ABI/profile inspection;
+  - complete module validation;
+  - deterministic double-package byte comparison;
+  - verified artifact upload.
+- `Flash safety` run `31233359159`: **PASS**
+  - transactional writer tests;
+  - superkey transaction tests;
+  - device/transaction-bound rollback tests;
+  - runtime ABI capability contract;
+  - physical validation harness syntax/ShellCheck.
 
-KernelPatch-Public masks the packed command to the low 16 bits, so the high token alone is not the blocker. The handshake magic, authentication convention, and extension command surface are different. Package-level compatibility has not been demonstrated.
+## Resolved static findings
 
-**Gate:** one reviewed ABI profile must own `kpimg`, `kptools`, `kpatch`, safemode and lifecycle-event behavior. Mixed profiles are forbidden unless an explicit compatibility layer is implemented and tested.
+### FR-001 — mixed userspace/kernel ABI family — **RESOLVED**
 
-### FR-002 — Shared patch working directory can reuse stale images
+The package no longer combines Public1158 kernel components with the historical
+Next2026 `kpatch-android` release binary.
 
-`boot_patch.sh` / `boot_unpatch.sh` currently use shared names such as `kernel`, `kernel.ori`, `ori.img` and `new-boot.img`, and may skip unpacking when `kernel` already exists.
+`version.properties` pins reviewed PatchNest source commit:
 
-**Gate:** each patch/unpatch operation must use a fresh private `mktemp -d` workspace, unpack the requested boot image unconditionally, and remove the workspace with a trap.
+`7fed93c4e259a6edf191c1a9900874babb232c4b`
 
-### FR-003 — Recovery selection is not bound to the flash target
+and the module build independently compiles `kpatch-public1158` for Android ARM64.
+The package provenance records the source commit and resulting binary SHA-256.
 
-`auto_unpatch()` currently chooses the newest backup by mtime. Older manifests are optional and `backup_verified=false` is not a hard rejection. Slot/partition/device identity is not bound to the selected backup.
+The compatibility target is explicit rather than runtime mutation probing:
 
-**Gate:** automatic restore may only select a backup whose manifest is present, `backup_verified=true`, digest-valid, and bound to the exact target partition/slot/device identity. Otherwise it must refuse to flash.
+- Public1158 token: `0x1158`;
+- hello: `0x11581158` / `hello1158`;
+- superkey-authenticated sensitive operations;
+- KPM / kstorage exclusion supported;
+- Public KPM event command `0x1150` supported through an event allowlist;
+- rehook forbidden because Public `0x1100/0x1101` mean SU grant/revoke, while
+  Next2026 uses those IDs for rehook operations.
 
-### FR-004 — Destructive flash has no mandatory readback verification
+`service.sh` accepts only exact `hello1158` / `hello2026` responses and derives
+runtime capability from the resulting profile. Unknown successful hello output is
+rejected.
 
-A successful write syscall/pipeline is currently treated as a successful boot flash.
+### FR-002 — shared patch workspace / stale image reuse — **RESOLVED**
 
-**Gate:** block-device flash must hash the exact bytes being written, write and sync them, read back the same byte range, and compare the digest. Targets for which reliable readback is unavailable require a separately validated device-specific strategy and are excluded from the general release baseline.
+Patch and unpatch use operation-private `mktemp -d` workspaces, freshly unpack the
+requested boot target and clean the workspace with traps. The historical
+"reuse kernel if present" path is rejected by CI.
 
-## P1 blockers
+### FR-003 — rollback not bound to exact target/device/transaction — **RESOLVED IN CODE**
 
-### FR-005 — Root shell `eval` remains in `getvar()`
+A destructive write creates a unique validated rollback backup. Automatic restore no
+longer scans or chooses a "latest" backup.
 
-The fallback `eval "$VARNAME=\$VALUE"` still evaluates attacker-controlled VALUE content under Android `/system/bin/sh`. Allow-listing only VARNAME does not make VALUE safe.
+The committed rollback transaction binds:
 
-**Gate:** replace with explicit case assignments; no `eval` in root-owned config parsing.
+- canonical boot target;
+- SHA-256 of device identity derived from boot serial + product/vbmeta/slot context;
+- one exact rollback backup filename and SHA-256;
+- exact patched-image SHA-256 and written byte length;
+- superkey digest;
+- verified-readback state.
 
-### FR-006 — Boot partition discovery can guess the wrong target
+Only the device-identity digest is persisted; the raw serial is not stored.
+Synthetic device identity is accepted only when `PATCHNEST_TRANSACTION_TEST=1` for
+CI and cannot replace production identity resolution.
 
-When the active slot is unresolved, the current fallback searches `boot_a` / `boot_b` and can also fall back to `vendor_boot` / `init_boot` as though they were interchangeable with boot.
+`boot_unpatch.sh --restore-bound-backup` verifies the device/slot/target context,
+backup digest and the current patched byte range before any restore write. External
+reflash, device mismatch or stale transaction state therefore fails closed.
 
-**Gate:** A/B devices require a resolved active slot. `vendor_boot` / `init_boot` require explicit separate support; they are never generic boot fallbacks.
+### FR-004 — destructive flash without mandatory readback — **RESOLVED**
 
-### FR-007 — Backup identity/hash logic does not cover normal block-device targets
+The reviewed writer performs payload normalization, capacity/read-only checks,
+write + fsync/sync, then SHA-256 readback over the exact written byte range.
+Digest mismatch is a hard failure.
 
-Several checks use `[ -f "$BOOT_FILE" ]`, while a real boot target is normally a block device. `original_sha256` can therefore remain null and external-change detection becomes ineffective.
+### FR-005 — root-shell `eval` fallback — **RESOLVED**
 
-**Gate:** capture/hash the actual boot bytes used to create the backup, independent of whether the source path is a regular file or block device.
+Reviewed patch/unpatch/extract paths source `flash_safety.sh`, whose config assignment
+uses an explicit allowlisted switch. No root-shell `eval` is used by this path.
 
-### FR-008 — Backup names can collide within one minute
+### FR-006 — ambiguous A/B boot target / vendor_boot guessing — **RESOLVED**
 
-Backup names currently have minute precision and can overwrite a previous good backup.
+The resolver accepts only `_a` / `_b` slot suffixes, refuses A/B devices when the
+active slot cannot be established, resolves the matching boot partition only and
+does not treat `vendor_boot` / `init_boot` as generic boot substitutes.
 
-**Gate:** no-clobber unique name (seconds + PID/random or `mktemp`) followed by atomic manifest/image promotion.
+### FR-007 — block-device backup/hash gap — **RESOLVED**
 
-### FR-009 — Embedded-KPM validation can fail open
+Backup capture hashes the actual boot target and captured bytes regardless of whether
+the source is a regular file or block device. Target and backup digests must match
+before patching. Rollback also verifies the currently written patched byte range.
 
-If `kptools -l -M` cannot verify an embedded KPM, patching currently proceeds with a warning.
+### FR-008 — backup name collision — **RESOLVED**
 
-**Gate:** release path fails closed. Any development override must be explicit, off by default, and visibly mark the output non-release.
+Backup names use UTC second precision plus `mktemp` uniqueness. Rollback selection is
+transaction-bound, not filename-order based.
 
-### FR-010 — KPM load argument contract was wrong
+### FR-009 — embedded KPM validation fail-open — **RESOLVED**
 
-Module scripts called `kpatch kpm load PATH -- ARGS`, while the current C CLI accepts `PATH [ARGS]`; literal `--` became the KPM argument and the intended string was ignored.
+Each embedded `-M` candidate must be an absolute existing file, contain ELF magic,
+be AArch64, pass `kptools -l -M` and expose a non-empty module name. Failure aborts
+before boot-image mutation.
 
-**Status:** fixed on this review branch in `service.sh` and `install_kpm.sh`. Rust parser foundation supports both call shapes for migration compatibility.
+### FR-010 — KPM argument contract mismatch — **RESOLVED**
 
-### FR-011 — Lifecycle event dispatch is not implemented by the packaged CLI
+Runtime uses `kpatch kpm load PATH [ARGS]`; a literal `--` is no longer passed as KPM
+argument data.
 
-`service.sh` called `kpatch event ...` even though the KPatch-Next-derived PatchNest CLI has no `event` command. Failures were hidden.
+WebUI also passes `-A` data directly through `spawn()` argv instead of shell-quoting
+values and accidentally embedding quote/backslash characters. Shell escaping remains
+only on actual shell command strings.
 
-**Status:** review branch now records the capability as unavailable instead of silently claiming dispatch success. Final behavior depends on FR-001 ABI unification.
+### FR-011 — lifecycle event path mismatched packaged ABI — **RESOLVED**
 
-### FR-012 — `kpatch hello` previously returned process success on handshake failure
+The Public1158 compatibility CLI implements reviewed KPM event command `0x1150` with
+an exact event allowlist. `service.sh` dispatches `POST_FS_DATA` and dispatches
+`BOOT_COMPLETED` only after Android reports boot completion. Next2026 never receives
+the Public event command.
 
-The C CLI printed the expected echo only on a matching magic but `main()` always returned 0.
+### FR-012 — hidden runtime failures / false hello success — **RESOLVED**
 
-**Status:** fixed on `PatchNest/fix/cli-contract-hardening`; syscall failure and foreign hello magic now produce a stable non-zero exit code.
+`kpatch hello` fails non-zero on syscall/authentication or foreign magic. Handshake,
+exclusion, rehook and Public event failures are surfaced in logs/unresolved state.
 
-## Release-only blockers
+### FR-013 — final ZIP reproducibility unproven — **RESOLVED**
 
-### FR-013 — Package output is not proven byte-reproducible
+`scripts/package_module.sh` normalizes timestamps, strips host-specific ZIP extras,
+uses canonical root entry names and a stable lexical file order.
 
-The same source tree produced a successful Actions module ZIP whose SHA-256 differed from the existing `v0.4.1-rc2` release asset. Normal `zip -r` metadata/timestamps are a likely cause.
+The final assembled module tree is packaged twice and must compare byte-for-byte
+identical before artifact upload. This passed in Build run `31233359168`.
 
-**Gate:** deterministic file order/timestamps/ZIP metadata and two-build byte comparison before publishing a hash-pinned update.
+## Remaining release blocker
 
-### FR-014 — Physical device lifecycle evidence is still missing
+### FR-014 — physical device lifecycle evidence — **OPEN / RELEASE-BLOCKING**
 
-Required before declaring fully flash-ready:
+Hosted CI cannot prove that a real device survives and correctly rolls back a boot
+partition write. The release gate remains closed until a supported ARM64 device
+produces evidence for all of the following:
 
-1. read-only preflight and target-slot identity;
-2. backup capture + manifest binding;
-3. patch without flash and image inspection;
-4. flash + exact readback verification;
-5. cold boot / warm reboot;
-6. KPM load/control/unload/reload;
-7. exclusion + rehook behavior;
-8. root-manager coexistence for each supported manager;
-9. rollback to the bound backup;
-10. deliberate failed-boot recovery test;
-11. second reboot after rollback;
-12. evidence bundle bound to component SHAs and flashed image hashes.
+1. read-only preflight and exact boot slot/target resolution;
+2. validated rollback backup creation before mutation;
+3. patch + destructive write + exact-range readback verification;
+4. cold boot with `sys.boot_completed=1`;
+5. `kpatch hello == hello1158` and valid `kpver`;
+6. superkey mode `0600` and matching transaction digests;
+7. KPM query/list behavior;
+8. one controlled diagnostic KPM load → info → unload cycle if a separately reviewed
+   diagnostic KPM is supplied;
+9. normal reboot and a second successful userspace/kernel handshake;
+10. read-only rollback eligibility verification;
+11. transaction-bound restore of the exact captured backup;
+12. reboot after restore and confirmation that the original boot/root chain is intact;
+13. negative rollback tests: device mismatch and externally modified boot must refuse
+    automatic restore;
+14. evidence bundle tied to the package/source/component hashes used for the test.
+
+`scripts/device_validation.sh` implements the evidence workflow. Read-only phases are
+default-safe. The destructive restore and KPM-cycle modes require exact unlock
+environment tokens and are never called automatically by CI or module startup.
+
+## Unsupported general baseline
+
+Character/NAND boot targets remain outside the reviewed release baseline. The writer
+rejects them until a device-specific erase/write/readback implementation and physical
+validation matrix exist.
 
 ## Branch policy
 
-`module/FLASH_REVIEW_BLOCKED` intentionally prevents installation of this branch until all P0 blockers are closed. Removing that marker requires a dedicated final review commit with evidence links; it must not be deleted as part of an unrelated change.
+Do **not** remove `module/FLASH_REVIEW_BLOCKED`, mark PR #5 ready, merge it, or publish
+a release solely because CI is green.
+
+The marker may be removed only on a dedicated physical-validation candidate after the
+exact source/artifact identities are frozen. The review/release branch remains blocked
+until FR-014 evidence passes.
