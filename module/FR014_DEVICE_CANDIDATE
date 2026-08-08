@@ -1,0 +1,3 @@
+PatchNest FR-014 physical-device candidate v2.
+Reviewed runtime base: f927a2738b7b3ae4cfc4a811897a1be9bc6acbe3
+Do not merge or publish as a general release until physical FR-014 evidence passes.
