@@ -20,9 +20,9 @@ if [ -f "$KPN_CONFIG" ]; then
         "$KPN_CONFIG" 2>/dev/null | tail -1 | sed -E 's/^[^=]*=//' | tr -d '"\r\n' | tr 'A-Z' 'a-z')
     case "$_val" in
         off|warn|strict) KPM_SIGNATURE_POLICY="$_val" ;;
-        0|false)         KPM_SIGNATURE_POLICY=off ;;
-        1|true|yes|on)   KPM_SIGNATURE_POLICY=strict ;;
-        *)               KPM_SIGNATURE_POLICY=warn ;;
+        0|false) KPM_SIGNATURE_POLICY=off ;;
+        1|true|yes|on) KPM_SIGNATURE_POLICY=strict ;;
+        *) KPM_SIGNATURE_POLICY=warn ;;
     esac
 fi
 
@@ -62,9 +62,10 @@ fi
 try_pending_public1158_key() {
     command -v patchnest_read_key_file >/dev/null 2>&1 || return 1
     command -v patchnest_pending_transaction_matches_written_key >/dev/null 2>&1 || return 1
+    command -v patchnest_commit_binding_from_pending_written >/dev/null 2>&1 || return 1
 
-    # Pending recovery is only the crash window after a verified boot write and
-    # before credential/binding commit. It never overrides a committed key.
+    # This is only the crash window after a verified boot write but before the
+    # credential/binding commit. A committed key is never replaced here.
     [ ! -e "$PATCHNEST_SUPERKEY_FILE" ] || return 1
     [ -e "$PATCHNEST_SUPERKEY_PENDING_FILE" ] || return 1
     [ -e "$PATCHNEST_PENDING_TRANSACTION_FILE" ] || return 1
@@ -82,28 +83,42 @@ try_pending_public1158_key() {
 
     _pn_pending_hello=$(PATCHNEST_SUPERKEY="$_pn_pending_key" kpatch hello 2>>"$LOG")
     _pn_pending_rc=$?
-    _pn_pending_key=''
     if [ "$_pn_pending_rc" -ne 0 ] || [ "$_pn_pending_hello" != "hello1158" ]; then
         echo "[$(date)] Pending Public1158 key did not authenticate the running kernel" >> "$LOG"
+        _pn_pending_key=''
         return 1
     fi
 
+    # The exact key/device/target/patched-byte tuple is now proven twice: by the
+    # pending transaction hash checks and by the kernel hello authentication.
+    # Promote the credential, then reconstruct rollback authorization from that
+    # same durable written transaction before allowing normal runtime mutation.
     if ! mv -f "$PATCHNEST_SUPERKEY_PENDING_FILE" "$PATCHNEST_SUPERKEY_FILE"; then
         echo "[$(date)] ERROR: authenticated pending key could not be promoted" >> "$LOG"
+        _pn_pending_key=''
         return 1
     fi
     if ! patchnest_key_file_is_secure "$PATCHNEST_SUPERKEY_FILE"; then
         mv -f "$PATCHNEST_SUPERKEY_FILE" "$PATCHNEST_SUPERKEY_PENDING_FILE" 2>/dev/null || true
         echo "[$(date)] ERROR: promoted Public1158 key failed security verification" >> "$LOG"
+        _pn_pending_key=''
         return 1
     fi
 
-    echo "[$(date)] RECOVERY: pending key matched written transaction and authenticated running kernel" >> "$LOG"
+    if ! patchnest_commit_binding_from_pending_written "$_pn_pending_key"; then
+        # Keep the active credential: it is the only authenticated access to the
+        # already-running patched kernel. But do not load KPMs or apply other
+        # mutations without a valid rollback authorization.
+        echo "[$(date)] ERROR: pending key recovered, but rollback binding reconstruction failed" >> "$LOG"
+        patchnest_mark_recovery_required "pending_key_promoted_binding_recovery_failed" || true
+        touch "$MODDIR/unresolved"
+        _pn_pending_key=''
+        return 1
+    fi
+
+    _pn_pending_key=''
+    echo "[$(date)] RECOVERY: authenticated pending key promoted and rollback binding reconstructed" >> "$LOG"
     touch "$PNDIR/credential_recovered_pending"
-    patchnest_mark_recovery_required "credential_recovered_before_binding_commit" || true
-    # Runtime access has been recovered, but rollback authorization was not
-    # atomically committed before the crash. Keep operator review mandatory.
-    touch "$MODDIR/unresolved"
     hello_out="hello1158"
     hello_rc=0
     return 0
