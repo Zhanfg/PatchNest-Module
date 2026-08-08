@@ -11,9 +11,17 @@ if [ -n "${MODPATH:-}" ] && [ -f "$MODPATH/transaction_safety.sh" ]; then
   . "$MODPATH/transaction_safety.sh"
 fi
 
+# util_functions.sh was imported from an installer context where abort() may
+# delete $MODPATH. Inside the installed PatchNest patch tree $MODPATH is
+# persistent recovery code, so destructive cleanup is never valid. Override it
+# for every reviewed runtime entry point before any target-resolution helper is
+# called.
+abort() {
+  >&2 echo "$1"
+  return 1
+}
+
 # No eval: supported Magisk/APatch config keys are assigned explicitly.
-# Do not call the upstream util_functions.sh abort() here: that helper removes
-# $MODPATH, which is the installed patch-helper directory in these entry points.
 getvar() {
   _pn_key=$1
   _pn_proppath='/data/.magisk /cache/.magisk'
