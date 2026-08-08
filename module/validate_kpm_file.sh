@@ -19,9 +19,11 @@ fail() {
     || fail "KPM file is missing, empty, non-regular, or a symlink" 2
 
 # Physical FR-014 candidate keeps normal persistent/direct KPM paths disabled.
-# The only permitted diagnostic load is device_validation.sh kpm-cycle, which
-# has an explicit unlock and unloads the module in the same controlled phase.
-if [ -f "$MODDIR/FR014_DEVICE_CANDIDATE" ]; then
+# The only allowed direct load is the controlled device_validation.sh kpm-cycle
+# phase. The context only exempts the candidate-mode ban; ELF/metadata/signature
+# admission below still runs in full.
+if [ -f "$MODDIR/FR014_DEVICE_CANDIDATE" ] && \
+   [ "${PATCHNEST_KPM_CONTEXT:-}" != "KPM_CYCLE" ]; then
     fail "Direct KPM loading is disabled on the FR-014 device candidate" 3
 fi
 
