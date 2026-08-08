@@ -113,6 +113,35 @@ EOF
     patchnest_state_file_is_secure "$RESTORE_RECEIPT"
 }
 
+restore_exact_backup_with_retry() {
+    flash_image "$BOUND_BACKUP" "$BOOT_TARGET"
+    _pn_first=$?
+    [ "$_pn_first" -eq 0 ] && return 0
+
+    case "$_pn_first" in
+        1|2|3|4|7)
+            # These statuses are emitted before the writer starts copying bytes.
+            >&2 echo "! restore rejected before target mutation: $_pn_first"
+            patchnest_mark_recovery_required "bound_restore_prewrite_failed:${_pn_first}" || true
+            return "$_pn_first"
+            ;;
+        *)
+            # 5/6 (and unknown future statuses) may mean target bytes were
+            # already changed. Retry the exact same verified backup once.
+            >&2 echo "! restore may have partially touched target (rc=$_pn_first); retrying exact backup"
+            flash_image "$BOUND_BACKUP" "$BOOT_TARGET"
+            _pn_retry=$?
+            if [ "$_pn_retry" -eq 0 ]; then
+                echo "- restore retry passed exact-range readback"
+                return 0
+            fi
+            >&2 echo "! CRITICAL: restore retry failed: $_pn_retry"
+            patchnest_mark_recovery_required "bound_restore_retry_failed:first=${_pn_first},retry=${_pn_retry}" || true
+            return 8
+            ;;
+    esac
+}
+
 resolve_bound_backup || exit $?
 
 if [ "$MODE" = "check" ]; then
@@ -125,17 +154,11 @@ fi
 
 echo "- restore: transaction-bound backup: $BOUND_BACKUP"
 echo "- restore: target: $BOOT_TARGET"
-flash_image "$BOUND_BACKUP" "$BOOT_TARGET"
-_pn_rc=$?
-if [ "$_pn_rc" -ne 0 ]; then
-    >&2 echo "! restore write/readback failed: $_pn_rc"
-    patchnest_mark_recovery_required "bound_restore_failed:${_pn_rc}" || true
-    exit 8
-fi
+restore_exact_backup_with_retry || exit 8
 
-# The low-level writer already compared exact bytes. Persist the receipt before
-# revoking rollback authorization so post-reboot validation can prove the boot
-# target equals the exact backup that was restored.
+# The low-level writer compared the exact bytes. Persist the receipt before
+# revoking rollback authorization so post-reboot validation can prove the target
+# equals the exact transaction-bound backup.
 write_restore_receipt || {
     >&2 echo "! Restore verified, but restore receipt could not be committed"
     patchnest_mark_recovery_required "restore_receipt_failed" || true
