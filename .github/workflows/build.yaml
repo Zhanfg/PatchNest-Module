@@ -99,13 +99,14 @@ jobs:
       - name: Check shell syntax
         run: |
           set -euo pipefail
-          for file in build.sh module/*.sh module/patch/*.sh; do
+          for file in build.sh scripts/package_module.sh module/*.sh module/patch/*.sh; do
             bash -n "$file"
           done
 
       - name: ShellCheck
         run: |
           shellcheck -s bash -S error build.sh
+          shellcheck -s sh -S warning scripts/package_module.sh
           shellcheck -s sh -S warning \
             --exclude=SC3043,SC2034,SC2115,SC2046,SC2319,SC2155 \
             module/service.sh module/customize.sh module/post-fs-data.sh \
@@ -307,11 +308,18 @@ jobs:
       - name: Validate complete module
         run: node tests/validate_module.js
 
-      - name: Package module
+      - name: Package module reproducibly
         run: |
           set -euo pipefail
           mkdir -p out
-          (cd module && zip -qr ../out/PatchNest-Module.zip .)
+          sh scripts/package_module.sh module out/PatchNest-Module.zip
+          sh scripts/package_module.sh module out/PatchNest-Module.repeat.zip
+          cmp -s out/PatchNest-Module.zip out/PatchNest-Module.repeat.zip || {
+            echo "::error::Same assembled module tree produced different ZIP bytes"
+            sha256sum out/PatchNest-Module.zip out/PatchNest-Module.repeat.zip
+            exit 1
+          }
+          rm -f out/PatchNest-Module.repeat.zip
           test -s out/PatchNest-Module.zip
           sha256sum out/PatchNest-Module.zip > out/PatchNest-Module.zip.sha256
           unzip -l out/PatchNest-Module.zip | grep -q 'module.prop'
