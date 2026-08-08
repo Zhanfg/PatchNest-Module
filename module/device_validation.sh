@@ -75,6 +75,7 @@ require_module_tree() {
     [ -x "$MODDIR/bin/magiskboot" ] || fail "magiskboot missing"
     [ -f "$MODDIR/patch/transaction_safety.sh" ] || fail "transaction helper missing"
     [ -f "$MODDIR/patch/transactional_flash.sh" ] || fail "transactional writer missing"
+    [ -f "$MODDIR/patch/fr014_gate.sh" ] || fail "FR-014 preflight gate helper missing"
     [ -x "$MODDIR/patch/boot_unpatch.sh" ] || fail "bound restore helper missing or not executable"
 }
 
@@ -200,11 +201,28 @@ finalize() {
 
 require_root
 require_module_tree
+PATCHNEST_MODULE_DIR=$MODDIR
+PATCHNEST_FR014_PREFLIGHT_FILE="$PNDIR/fr014_preflight.json"
+PATCHNEST_ROLLBACK_BINDING_FILE="$PNDIR/rollback_binding.json"
+PATCHNEST_PENDING_TRANSACTION_FILE="$PNDIR/transaction.pending.json"
+PATCHNEST_RECOVERY_REQUIRED_FILE="$PNDIR/flash_recovery_required"
+PATCHNEST_BACKUP_DIR="$PNDIR/backup"
+export PATCHNEST_MODULE_DIR PATCHNEST_FR014_PREFLIGHT_FILE
+export PATCHNEST_ROLLBACK_BINDING_FILE PATCHNEST_PENDING_TRANSACTION_FILE PATCHNEST_RECOVERY_REQUIRED_FILE PATCHNEST_BACKUP_DIR
+# shellcheck disable=SC1090
+. "$MODDIR/patch/transaction_safety.sh"
+# shellcheck disable=SC1090
+. "$MODDIR/patch/fr014_gate.sh"
 resolve_target
 collect_common
 
 case "$MODE" in
     preflight)
+        # A candidate receipt is one-time. Re-running preflight intentionally
+        # revokes any older receipt before re-evaluating the live target/state.
+        if [ ! -f "$MODDIR/FLASH_REVIEW_BLOCKED" ]; then
+            patchnest_clear_fr014_preflight_receipt || fail "cannot clear stale FR-014 preflight receipt"
+        fi
         validate_target_unpack
         record_cmd "kpatch file digest" sha256sum "$MODDIR/bin/kpatch" || true
         record_cmd "kptools file digest" sha256sum "$MODDIR/bin/kptools" || true
@@ -215,6 +233,9 @@ case "$MODE" in
         if [ -f "$MODDIR/FLASH_REVIEW_BLOCKED" ]; then
             log "result=REVIEW_PACKAGE_INTENTIONALLY_BLOCKED"
         else
+            patchnest_write_fr014_preflight_receipt "$TARGET" || fail "cannot commit FR-014 preflight receipt"
+            copy_if_present "$PATCHNEST_FR014_PREFLIGHT_FILE" "fr014_preflight.json"
+            log "fr014_preflight_receipt=$PATCHNEST_FR014_PREFLIGHT_FILE"
             log "result=PREFLIGHT_PASS"
         fi
         ;;
