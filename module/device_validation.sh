@@ -50,7 +50,7 @@ json_number() {
 json_bool() {
     _pn_key=$1
     _pn_file=$2
-    grep -o "\"${_pn_key}\"[[:space:]]*:[[:space:]]*(true|false)" "$_pn_file" 2>/dev/null \
+    grep -Eo "\"${_pn_key}\"[[:space:]]*:[[:space:]]*(true|false)" "$_pn_file" 2>/dev/null \
         | head -n 1 \
         | sed -E "s/.*\"${_pn_key}\"[[:space:]]*:[[:space:]]*(true|false).*/\\1/"
 }
