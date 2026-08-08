@@ -9,6 +9,11 @@ fail() {
     exit 1
 }
 
+# The production script intentionally uses Android's /data/local/tmp. This
+# contract runs under sudo on Ubuntu, so create the Android temp root explicitly
+# rather than weakening the production path.
+mkdir -p /data/local/tmp
+
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 MOD="$TMP/module"
