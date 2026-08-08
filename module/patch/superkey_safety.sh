@@ -65,14 +65,42 @@ patchnest_superkey_sha256() {
 
 patchnest_commit_superkey() {
     [ -n "$PATCHNEST_SUPERKEY" ] || return 1
+
+    # On the destructive patch path, the rollback transaction record is part of
+    # credential commit. If it cannot be bound to this device/target/backup,
+    # report failure so boot_patch.sh restores the verified pre-write image.
+    _pn_binding_committed=0
+    if [ "${FLASH_TO_DEVICE:-false}" = "true" ]; then
+        command -v patchnest_commit_rollback_binding >/dev/null 2>&1 || return 1
+        patchnest_commit_rollback_binding || return 1
+        _pn_binding_committed=1
+    fi
+
     _pn_dir=${PATCHNEST_SUPERKEY_FILE%/*}
-    mkdir -p "$_pn_dir" || return 1
+    mkdir -p "$_pn_dir" || {
+        [ "$_pn_binding_committed" -eq 0 ] || patchnest_remove_rollback_binding
+        return 1
+    }
     umask 077
     _pn_tmp="${PATCHNEST_SUPERKEY_FILE}.tmp.$$"
-    printf '%s\n' "$PATCHNEST_SUPERKEY" > "$_pn_tmp" || return 1
-    chmod 0600 "$_pn_tmp" || { rm -f "$_pn_tmp"; return 1; }
-    mv -f "$_pn_tmp" "$PATCHNEST_SUPERKEY_FILE" || return 1
-    chmod 0600 "$PATCHNEST_SUPERKEY_FILE" || return 1
+    printf '%s\n' "$PATCHNEST_SUPERKEY" > "$_pn_tmp" || {
+        [ "$_pn_binding_committed" -eq 0 ] || patchnest_remove_rollback_binding
+        return 1
+    }
+    chmod 0600 "$_pn_tmp" || {
+        rm -f "$_pn_tmp"
+        [ "$_pn_binding_committed" -eq 0 ] || patchnest_remove_rollback_binding
+        return 1
+    }
+    mv -f "$_pn_tmp" "$PATCHNEST_SUPERKEY_FILE" || {
+        rm -f "$_pn_tmp"
+        [ "$_pn_binding_committed" -eq 0 ] || patchnest_remove_rollback_binding
+        return 1
+    }
+    chmod 0600 "$PATCHNEST_SUPERKEY_FILE" || {
+        [ "$_pn_binding_committed" -eq 0 ] || patchnest_remove_rollback_binding
+        return 1
+    }
 }
 
 patchnest_store_export_key() {
