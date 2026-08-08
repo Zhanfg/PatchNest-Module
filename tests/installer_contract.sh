@@ -31,7 +31,7 @@ make_fake_module() {
 
     for _pn_script in \
         boot_patch.sh boot_extract.sh boot_unpatch.sh flash_safety.sh \
-        transaction_safety.sh transactional_flash.sh superkey_safety.sh; do
+        transaction_safety.sh transactional_flash.sh fr014_gate.sh superkey_safety.sh; do
         printf '%s\n' '#!/bin/sh' 'exit 0' > "$_pn_dir/patch/$_pn_script"
         chmod 0644 "$_pn_dir/patch/$_pn_script"
     done
@@ -83,9 +83,10 @@ run_installer() {
     [ "$(stat -c '%a' "$_pn_state/root_manager")" = "600" ] || return 92
     [ "$(stat -c '%a' "$_pn_mod/bin/kpatch")" = "755" ] || return 93
     [ "$(stat -c '%a' "$_pn_mod/patch/boot_patch.sh")" = "755" ] || return 94
-    [ "$(stat -c '%a' "$_pn_mod/device_validation.sh")" = "755" ] || return 95
-    [ "$(stat -c '%a' "$_pn_mod/export_recovery_boot.sh")" = "755" ] || return 96
-    [ ! -e "$_pn_mod/module.prop.bak" ] || return 97
+    [ "$(stat -c '%a' "$_pn_mod/patch/fr014_gate.sh")" = "755" ] || return 95
+    [ "$(stat -c '%a' "$_pn_mod/device_validation.sh")" = "755" ] || return 96
+    [ "$(stat -c '%a' "$_pn_mod/export_recovery_boot.sh")" = "755" ] || return 97
+    [ ! -e "$_pn_mod/module.prop.bak" ] || return 98
     return 0
 }
 
