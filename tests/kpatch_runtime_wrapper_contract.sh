@@ -43,15 +43,21 @@ chmod 0755 "$MOD/validate_kpm_file.sh"
 
 printf '%s\n' synthetic > "$TMP/module.kpm"
 
+# Production correctly uses /system/bin/sh. Ubuntu CI has no /system/bin/sh,
+# so execute the same wrapper body through the host POSIX shell here.
+run_wrapper() {
+    PATH="$BIN:$PATH" sh "$BIN/kpatch" "$@"
+}
+
 # 1. Non-load commands delegate unchanged and never invoke KPM admission.
-PATH="$BIN:$PATH" "$BIN/kpatch" hello > "$TMP/hello.out"
+run_wrapper hello > "$TMP/hello.out"
 [ "$(cat "$TMP/hello.out")" = "hello1158" ] || fail "hello output was not delegated unchanged"
 grep -Fxq 'hello' "$TMP/real.calls" || fail "hello did not reach real CLI"
 [ ! -e "$TMP/validator.calls" ] || fail "non-KPM command invoked KPM validator"
 
 # 2. kpm load must validate before real CLI and preserve all argv content.
 : > "$TMP/real.calls"
-PATH="$BIN:$PATH" "$BIN/kpatch" kpm load "$TMP/module.kpm" 'mode=test value=2'
+run_wrapper kpm load "$TMP/module.kpm" 'mode=test value=2'
 [ "$(cat "$TMP/validator.calls")" = "$TMP/module.kpm" ] || fail "KPM path was not sent to validator"
 grep -Fxq "kpm load $TMP/module.kpm mode=test value=2" "$TMP/real.calls" \
     || fail "validated KPM load was not delegated with original argv"
@@ -60,7 +66,7 @@ grep -Fxq "kpm load $TMP/module.kpm mode=test value=2" "$TMP/real.calls" \
 : > "$TMP/real.calls"
 : > "$TMP/validator.calls"
 set +e
-PATCHNEST_TEST_VALIDATOR_RC=17 PATH="$BIN:$PATH" "$BIN/kpatch" kpm load "$TMP/module.kpm" rejected >/dev/null 2>&1
+PATCHNEST_TEST_VALIDATOR_RC=17 run_wrapper kpm load "$TMP/module.kpm" rejected >/dev/null 2>&1
 rc=$?
 set -e
 [ "$rc" -eq 17 ] || fail "validator rejection status was not propagated (rc=$rc)"
@@ -71,7 +77,7 @@ set -e
 rm -f "$MOD/validate_kpm_file.sh"
 : > "$TMP/real.calls"
 set +e
-PATH="$BIN:$PATH" "$BIN/kpatch" kpm load "$TMP/module.kpm" >/dev/null 2>&1
+run_wrapper kpm load "$TMP/module.kpm" >/dev/null 2>&1
 rc=$?
 set -e
 [ "$rc" -eq 3 ] || fail "missing validator did not fail closed with rc=3 (rc=$rc)"
@@ -80,7 +86,7 @@ set -e
 # 5. Missing real CLI fails closed for every command.
 mv "$BIN/kpatch.real" "$BIN/kpatch.real.missing"
 set +e
-PATH="$BIN:$PATH" "$BIN/kpatch" hello >/dev/null 2>&1
+run_wrapper hello >/dev/null 2>&1
 rc=$?
 set -e
 [ "$rc" -eq 127 ] || fail "missing real CLI did not fail with rc=127 (rc=$rc)"
