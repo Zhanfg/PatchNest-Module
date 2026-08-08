@@ -12,8 +12,6 @@ fail() {
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 
-# Production installer must never hard-code the final module directory or copy
-# the extracted module tree into another location. MODPATH is the install root.
 ! grep -Fq '/data/adb/modules/PatchNest' "$CUSTOMIZE" \
     || fail "installer hard-codes /data/adb/modules/PatchNest"
 ! grep -Eq 'cp[[:space:]].*\$MODPATH/(bin|patch|webroot).*\/data\/adb\/modules' "$CUSTOMIZE" \
@@ -37,7 +35,7 @@ make_fake_module() {
         printf '%s\n' '#!/bin/sh' 'exit 0' > "$_pn_dir/patch/$_pn_script"
         chmod 0644 "$_pn_dir/patch/$_pn_script"
     done
-    for _pn_tool in device_validation.sh arm_auto_recovery.sh verify_auto_recovery.sh; do
+    for _pn_tool in device_validation.sh arm_auto_recovery.sh verify_auto_recovery.sh export_recovery_boot.sh; do
         printf '%s\n' '#!/bin/sh' 'exit 0' > "$_pn_dir/$_pn_tool"
         chmod 0644 "$_pn_dir/$_pn_tool"
     done
@@ -54,12 +52,8 @@ run_installer() {
     (
         ui_print() { printf 'UI:%s\n' "$*" >> "$_pn_log"; }
         abort() { printf 'ABORT:%s\n' "$*" >> "$_pn_log"; exit 99; }
-        set_perm() {
-            # target owner group mode [context]
-            chmod "$4" "$1"
-        }
+        set_perm() { chmod "$4" "$1"; }
         set_perm_recursive() {
-            # dir owner group dirmode filemode [context]
             _d=$1; _dm=$4; _fm=$5
             find "$_d" -type d -exec chmod "$_dm" {} +
             find "$_d" -type f -exec chmod "$_fm" {} +
@@ -90,11 +84,11 @@ run_installer() {
     [ "$(stat -c '%a' "$_pn_mod/bin/kpatch")" = "755" ] || return 93
     [ "$(stat -c '%a' "$_pn_mod/patch/boot_patch.sh")" = "755" ] || return 94
     [ "$(stat -c '%a' "$_pn_mod/device_validation.sh")" = "755" ] || return 95
-    [ ! -e "$_pn_mod/module.prop.bak" ] || return 96
+    [ "$(stat -c '%a' "$_pn_mod/export_recovery_boot.sh")" = "755" ] || return 96
+    [ ! -e "$_pn_mod/module.prop.bak" ] || return 97
     return 0
 }
 
-# Review marker must abort before the state directory is created.
 BLOCKED="$TMP/blocked-module"
 BLOCKED_STATE="$TMP/blocked-state"
 make_fake_module "$BLOCKED"
@@ -107,8 +101,6 @@ set -e
 [ ! -e "$BLOCKED_STATE" ] || fail "review blocker allowed persistent state creation"
 grep -Fq 'ABORT:! FLASH_REVIEW_BLOCKED' "$TMP/blocked.log" || fail "review blocker abort reason missing"
 
-# Candidate behavior: the same already-extracted MODPATH must work under each
-# manager convention without copying to a hard-coded final module directory.
 for spec in 'magisk:magisk' 'ksu:ksu' 'apatch:apatch'; do
     manager=${spec%%:*}
     expected=${spec#*:}
