@@ -6,7 +6,9 @@ set -u
 
 MODE=${1:-preflight}
 [ "$#" -gt 0 ] && shift
-MODDIR=${PATCHNEST_MODDIR:-/data/adb/modules/PatchNest}
+SCRIPT_DIR=${0%/*}
+MODDIR=${PATCHNEST_MODDIR:-$SCRIPT_DIR}
+MODDIR=$(readlink -f "$MODDIR" 2>/dev/null || printf '%s' "$MODDIR")
 PNDIR=${PATCHNEST_STATE_DIR:-/data/adb/patchnest}
 STAMP=$(date -u +%Y%m%dT%H%M%SZ 2>/dev/null || date +%Y%m%dT%H%M%S)
 EVIDENCE=${PATCHNEST_EVIDENCE_DIR:-/data/local/tmp/patchnest-evidence-$STAMP}
