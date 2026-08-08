@@ -21,6 +21,8 @@ on:
       - 'tests/flash_safety_contract.sh'
       - 'tests/destructive_transaction_contract.sh'
       - 'tests/bootloop_recovery_contract.sh'
+      - 'tests/boot_resolution_failure_contract.sh'
+      - 'tests/fr014_preflight_contract.sh'
       - 'tests/installer_contract.sh'
       - 'tests/recovery_export_contract.sh'
       - 'tests/runtime_abi_contract.sh'
@@ -44,6 +46,8 @@ on:
       - 'tests/flash_safety_contract.sh'
       - 'tests/destructive_transaction_contract.sh'
       - 'tests/bootloop_recovery_contract.sh'
+      - 'tests/boot_resolution_failure_contract.sh'
+      - 'tests/fr014_preflight_contract.sh'
       - 'tests/installer_contract.sh'
       - 'tests/recovery_export_contract.sh'
       - 'tests/runtime_abi_contract.sh'
@@ -66,7 +70,7 @@ jobs:
       - name: Shell syntax
         run: |
           set -euo pipefail
-          for file in module/patch/*.sh module/service.sh module/post-fs-data.sh module/customize.sh module/device_validation.sh module/arm_auto_recovery.sh module/verify_auto_recovery.sh module/export_recovery_boot.sh scripts/device_validation.sh scripts/package_module.sh tests/flash_safety_contract.sh tests/destructive_transaction_contract.sh tests/bootloop_recovery_contract.sh tests/installer_contract.sh tests/recovery_export_contract.sh tests/runtime_abi_contract.sh; do
+          for file in module/patch/*.sh module/service.sh module/post-fs-data.sh module/customize.sh module/device_validation.sh module/arm_auto_recovery.sh module/verify_auto_recovery.sh module/export_recovery_boot.sh scripts/device_validation.sh scripts/package_module.sh tests/flash_safety_contract.sh tests/destructive_transaction_contract.sh tests/bootloop_recovery_contract.sh tests/boot_resolution_failure_contract.sh tests/fr014_preflight_contract.sh tests/installer_contract.sh tests/recovery_export_contract.sh tests/runtime_abi_contract.sh; do
             sh -n "$file"
           done
 
@@ -93,6 +97,8 @@ jobs:
             tests/flash_safety_contract.sh \
             tests/destructive_transaction_contract.sh \
             tests/bootloop_recovery_contract.sh \
+            tests/boot_resolution_failure_contract.sh \
+            tests/fr014_preflight_contract.sh \
             tests/installer_contract.sh \
             tests/recovery_export_contract.sh \
             tests/runtime_abi_contract.sh
@@ -107,8 +113,14 @@ jobs:
           PATCHNEST_TRANSACTION_TEST: '1'
         run: sh tests/destructive_transaction_contract.sh
 
+      - name: Prove boot-resolution failures preserve recovery helpers
+        run: sh tests/boot_resolution_failure_contract.sh
+
       - name: Run bootloop automatic recovery contract
         run: sh tests/bootloop_recovery_contract.sh
+
+      - name: Run clean FR-014 preflight contract
+        run: sudo sh tests/fr014_preflight_contract.sh
 
       - name: Run cross-manager installer contract
         run: sh tests/installer_contract.sh
