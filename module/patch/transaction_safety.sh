@@ -254,6 +254,7 @@ patchnest_commit_rollback_binding() {
         [ "$(patchnest_json_string state "$PATCHNEST_PENDING_TRANSACTION_FILE")" = "written" ] || return 1
         [ "$(patchnest_json_string boot_target "$PATCHNEST_PENDING_TRANSACTION_FILE")" = "$BOOT_TARGET" ] || return 1
         [ "$(patchnest_json_string device_binding_sha256 "$PATCHNEST_PENDING_TRANSACTION_FILE")" = "$_pn_device_sha" ] || return 1
+        [ "$(patchnest_json_string rollback_backup "$PATCHNEST_PENDING_TRANSACTION_FILE")" = "$_pn_backup_name" ] || return 1
         [ "$(patchnest_json_string rollback_backup_sha256 "$PATCHNEST_PENDING_TRANSACTION_FILE")" = "$_pn_backup_sha" ] || return 1
         [ "$(patchnest_json_string patched_image_sha256 "$PATCHNEST_PENDING_TRANSACTION_FILE")" = "$_pn_patched_sha" ] || return 1
         [ "$(patchnest_json_number patched_image_size "$PATCHNEST_PENDING_TRANSACTION_FILE")" = "$_pn_patched_size" ] || return 1
