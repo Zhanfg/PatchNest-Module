@@ -2,6 +2,13 @@
 # High-level destructive boot write transaction.
 # Requires flash_safety.sh, transaction_safety.sh and superkey_safety.sh.
 
+# Candidate-only physical validation gate. Normal review/release trees without
+# FR014_DEVICE_CANDIDATE treat this helper as a no-op.
+if [ -n "${MODPATH:-}" ] && [ -f "$MODPATH/fr014_gate.sh" ]; then
+    # shellcheck disable=SC1091
+    . "$MODPATH/fr014_gate.sh"
+fi
+
 patchnest_discard_pending_key_if_new() {
     if command -v patchnest_discard_pending_key >/dev/null 2>&1; then
         patchnest_discard_pending_key || true
@@ -34,6 +41,7 @@ patchnest_attempt_verified_rollback() {
 
 # Returns:
 #   0  write verified and pending transaction advanced to state=written
+#   9  FR-014 candidate preflight gate rejected; target untouched
 #   10 transaction could not be staged; target untouched
 #   11 writer rejected before target mutation; transient state removed
 #   20 writer may have touched target; verified rollback succeeded
@@ -44,6 +52,13 @@ patchnest_transactional_flash() {
     _pn_source=$1
     _pn_target=$2
     _pn_backup=$3
+
+    if command -v patchnest_consume_fr014_preflight_if_required >/dev/null 2>&1; then
+        if ! patchnest_consume_fr014_preflight_if_required "$_pn_target"; then
+            patchnest_discard_pending_key_if_new
+            return 9
+        fi
+    fi
 
     patchnest_stage_pending_transaction "$_pn_source" "$_pn_target" "$_pn_backup" || {
         patchnest_discard_pending_key_if_new
