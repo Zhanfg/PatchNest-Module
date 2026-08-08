@@ -3,6 +3,14 @@
 # Source this AFTER util_functions.sh. It deliberately replaces only the
 # high-risk helpers used by PatchNest boot patch/unpatch flows.
 
+# Transaction binding helpers are kept separate from the low-level writer but
+# are loaded here so every reviewed patch/unpatch path receives the same device
+# identity and rollback semantics.
+if [ -n "${MODPATH:-}" ] && [ -f "$MODPATH/transaction_safety.sh" ]; then
+  # shellcheck disable=SC1091
+  . "$MODPATH/transaction_safety.sh"
+fi
+
 # No eval: supported Magisk/APatch config keys are assigned explicitly.
 getvar() {
   _pn_key=$1
