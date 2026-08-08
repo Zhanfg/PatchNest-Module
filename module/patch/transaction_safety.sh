@@ -39,6 +39,9 @@ patchnest_commit_rollback_binding() {
         boot_backup_*.img) ;;
         *) return 1 ;;
     esac
+    case "$_pn_backup_name" in
+        */*|*..*) return 1 ;;
+    esac
 
     _pn_backup_sha=$(sha256sum "$BACKUP_CANDIDATE" 2>/dev/null | awk '{print $1}')
     _pn_patched_sha=$(sha256sum "$WORKDIR/new-boot.img" 2>/dev/null | awk '{print $1}')
@@ -78,8 +81,19 @@ patchnest_commit_rollback_binding() {
 }
 EOF
     chmod 0600 "$_pn_tmp" || { rm -f "$_pn_tmp"; return 1; }
-    mv -f "$_pn_tmp" "$PATCHNEST_ROLLBACK_BINDING_FILE" || return 1
-    chmod 0600 "$PATCHNEST_ROLLBACK_BINDING_FILE" || return 1
+    [ "$(stat -c '%a' "$_pn_tmp" 2>/dev/null)" = "600" ] || {
+        rm -f "$_pn_tmp"
+        return 1
+    }
+
+    # One irreversible binding transition. No chmod or other potentially
+    # failing mutation is performed after mv, so an existing valid binding is
+    # either untouched or atomically replaced by the complete new record.
+    mv -f "$_pn_tmp" "$PATCHNEST_ROLLBACK_BINDING_FILE" || {
+        rm -f "$_pn_tmp"
+        return 1
+    }
+    return 0
 }
 
 patchnest_remove_rollback_binding() {
