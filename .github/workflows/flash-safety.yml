@@ -47,6 +47,7 @@ jobs:
             module/patch/boot_extract.sh \
             module/patch/boot_unpatch.sh \
             module/patch/flash_safety.sh \
+            module/patch/superkey_safety.sh \
             tests/flash_safety_contract.sh
 
       - name: Run transactional flash contract
