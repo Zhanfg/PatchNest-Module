@@ -287,8 +287,9 @@ fi
 
 if [ "$FLASH_TO_DEVICE" = "true" ]; then
   echo "- Flashing with mandatory SHA-256 readback verification"
-  if ! flash_image "$WORKDIR/new-boot.img" "$BOOT_TARGET"; then
-    _pn_rc=$?
+  flash_image "$WORKDIR/new-boot.img" "$BOOT_TARGET"
+  _pn_rc=$?
+  if [ "$_pn_rc" -ne 0 ]; then
     >&2 echo "! Flash/readback verification failed: $_pn_rc"
     save_image_to_storage "$WORKDIR/new-boot.img" || true
     exit 1
