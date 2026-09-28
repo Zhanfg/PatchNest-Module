@@ -1,5 +1,8 @@
 # PatchNest Module
 
+> **Canonical repository:** active development has moved to [`Zhanfg/PatchNest`](https://github.com/Zhanfg/PatchNest), under `module/`. This standalone repository is retained for historical releases and the still-open physical-validation drafts; do not treat it as the canonical development target.
+
+
 **English** | [中文](README_zh-CN.md)
 
 PatchNest Module provides a KPM host and management WebUI for Magisk, KernelSU, KernelSU-Next and APatch. It is maintained as a downstream project of `KernelSU-Next/KPatch-Next-Module` with an independent release and dependency chain.
