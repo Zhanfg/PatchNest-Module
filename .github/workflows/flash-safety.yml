@@ -1,0 +1,178 @@
+name: Flash safety
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'module/*.sh'
+      - 'module/patch/**'
+      - 'scripts/device_validation.sh'
+      - 'scripts/package_module.sh'
+      - 'version.properties'
+      - 'tests/flash_safety_contract.sh'
+      - 'tests/destructive_transaction_contract.sh'
+      - 'tests/transaction_backup_identity_contract.sh'
+      - 'tests/bootloop_recovery_contract.sh'
+      - 'tests/boot_resolution_failure_contract.sh'
+      - 'tests/candidate_prepatch_idle_contract.sh'
+      - 'tests/fr014_preflight_contract.sh'
+      - 'tests/fr014_write_gate_contract.sh'
+      - 'tests/kpm_install_security_contract.sh'
+      - 'tests/kpm_runtime_admission_contract.sh'
+      - 'tests/kpm_signature_contract.sh'
+      - 'tests/kpatch_runtime_wrapper_contract.sh'
+      - 'tests/installer_contract.sh'
+      - 'tests/recovery_export_contract.sh'
+      - 'tests/runtime_abi_contract.sh'
+      - 'tests/validate_flash_package.js'
+      - '.github/workflows/flash-safety.yml'
+  push:
+    branches:
+      - 'review/flash-readiness-hardening'
+      - 'review/flash-readiness-final'
+    paths:
+      - 'module/*.sh'
+      - 'module/patch/**'
+      - 'scripts/device_validation.sh'
+      - 'scripts/package_module.sh'
+      - 'version.properties'
+      - 'tests/flash_safety_contract.sh'
+      - 'tests/destructive_transaction_contract.sh'
+      - 'tests/transaction_backup_identity_contract.sh'
+      - 'tests/bootloop_recovery_contract.sh'
+      - 'tests/boot_resolution_failure_contract.sh'
+      - 'tests/candidate_prepatch_idle_contract.sh'
+      - 'tests/fr014_preflight_contract.sh'
+      - 'tests/fr014_write_gate_contract.sh'
+      - 'tests/kpm_install_security_contract.sh'
+      - 'tests/kpm_runtime_admission_contract.sh'
+      - 'tests/kpm_signature_contract.sh'
+      - 'tests/kpatch_runtime_wrapper_contract.sh'
+      - 'tests/installer_contract.sh'
+      - 'tests/recovery_export_contract.sh'
+      - 'tests/runtime_abi_contract.sh'
+      - 'tests/validate_flash_package.js'
+      - '.github/workflows/flash-safety.yml'
+  workflow_dispatch:
+
+jobs:
+  contract:
+    name: Transactional flash and ABI contract
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck zip unzip xxd openssl
+
+      - name: Shell and validator syntax
+        run: |
+          set -euo pipefail
+          for file in module/patch/*.sh module/service.sh module/post-fs-data.sh module/customize.sh module/install_kpm.sh module/kpm_verify.sh module/validate_kpm_file.sh module/kpatch_runtime_wrapper.sh module/uninstall.sh module/device_validation.sh module/arm_auto_recovery.sh module/verify_auto_recovery.sh module/export_recovery_boot.sh scripts/device_validation.sh scripts/package_module.sh tests/flash_safety_contract.sh tests/destructive_transaction_contract.sh tests/transaction_backup_identity_contract.sh tests/bootloop_recovery_contract.sh tests/boot_resolution_failure_contract.sh tests/candidate_prepatch_idle_contract.sh tests/fr014_preflight_contract.sh tests/fr014_write_gate_contract.sh tests/kpm_install_security_contract.sh tests/kpm_runtime_admission_contract.sh tests/kpm_signature_contract.sh tests/kpatch_runtime_wrapper_contract.sh tests/installer_contract.sh tests/recovery_export_contract.sh tests/runtime_abi_contract.sh; do
+            sh -n "$file"
+          done
+          node --check tests/validate_flash_package.js
+
+      - name: ShellCheck reviewed flash/runtime path
+        run: |
+          shellcheck -s sh -S warning \
+            --exclude=SC3043,SC2034,SC2115,SC2046,SC2319,SC2155 \
+            module/patch/boot_patch.sh \
+            module/patch/boot_extract.sh \
+            module/patch/boot_unpatch.sh \
+            module/patch/flash_safety.sh \
+            module/patch/transaction_safety.sh \
+            module/patch/transactional_flash.sh \
+            module/patch/fr014_gate.sh \
+            module/patch/superkey_safety.sh \
+            module/service.sh \
+            module/post-fs-data.sh \
+            module/customize.sh \
+            module/install_kpm.sh \
+            module/kpm_verify.sh \
+            module/validate_kpm_file.sh \
+            module/kpatch_runtime_wrapper.sh \
+            module/uninstall.sh \
+            module/device_validation.sh \
+            module/arm_auto_recovery.sh \
+            module/verify_auto_recovery.sh \
+            module/export_recovery_boot.sh \
+            scripts/device_validation.sh \
+            scripts/package_module.sh \
+            tests/flash_safety_contract.sh \
+            tests/destructive_transaction_contract.sh \
+            tests/transaction_backup_identity_contract.sh \
+            tests/bootloop_recovery_contract.sh \
+            tests/boot_resolution_failure_contract.sh \
+            tests/candidate_prepatch_idle_contract.sh \
+            tests/fr014_preflight_contract.sh \
+            tests/fr014_write_gate_contract.sh \
+            tests/kpm_install_security_contract.sh \
+            tests/kpm_runtime_admission_contract.sh \
+            tests/kpm_signature_contract.sh \
+            tests/kpatch_runtime_wrapper_contract.sh \
+            tests/installer_contract.sh \
+            tests/recovery_export_contract.sh \
+            tests/runtime_abi_contract.sh
+
+      - name: Run baseline flash contract
+        env:
+          PATCHNEST_TRANSACTION_TEST: '1'
+        run: sh tests/flash_safety_contract.sh
+
+      - name: Run destructive failure-injection contract
+        env:
+          PATCHNEST_TRANSACTION_TEST: '1'
+        run: sh tests/destructive_transaction_contract.sh
+
+      - name: Reject mismatched transaction backup identity
+        run: sh tests/transaction_backup_identity_contract.sh
+
+      - name: Prove boot-resolution failures preserve recovery helpers
+        run: sh tests/boot_resolution_failure_contract.sh
+
+      - name: Run bootloop automatic recovery contract
+        run: sh tests/bootloop_recovery_contract.sh
+
+      - name: Run FR-014 prepatch idle state contract
+        run: sh tests/candidate_prepatch_idle_contract.sh
+
+      - name: Run clean FR-014 preflight contract
+        run: sudo sh tests/fr014_preflight_contract.sh
+
+      - name: Enforce FR-014 preflight + recovery-export write authorization
+        run: sh tests/fr014_write_gate_contract.sh
+
+      - name: Run KPM ZIP admission contract
+        run: sudo sh tests/kpm_install_security_contract.sh
+
+      - name: Run KPM runtime admission contract
+        run: sh tests/kpm_runtime_admission_contract.sh
+
+      - name: Run KPM Ed25519 signature contract
+        run: sh tests/kpm_signature_contract.sh
+
+      - name: Run centralized kpatch runtime wrapper contract
+        run: sh tests/kpatch_runtime_wrapper_contract.sh
+
+      - name: Run cross-manager installer contract
+        run: sh tests/installer_contract.sh
+
+      - name: Run off-device recovery export contract
+        run: sudo sh tests/recovery_export_contract.sh
+
+      - name: Run runtime ABI contract
+        run: sh tests/runtime_abi_contract.sh
+
+      - name: Prove flash-safety files enter deterministic ZIP
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/patchnest-package-test
+          sh scripts/package_module.sh module /tmp/patchnest-package-test/module.zip
+          test -s /tmp/patchnest-package-test/module.zip
