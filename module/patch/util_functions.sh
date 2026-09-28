@@ -50,27 +50,18 @@ getvar() {
   local VARNAME=$1
   local VALUE
   local PROPPATH='/data/.magisk /cache/.magisk'
-  # P1 fix: $MAGISKTMP was unquoted in `[ ! -z $MAGISKTMP ]`; an
-  # unset var made the test `[ ! -z ]` always true.
-  [ -n "$MAGISKTMP" ] && PROPPATH="$MAGISKTMP/.magisk/config $PROPPATH"
-  VALUE=$(grep_prop $VARNAME $PROPPATH)
-  # P0-1 security fix: replace eval with printf -v and add a key allow-list
-  # to prevent shell-injection via attacker-controlled VALUE.
-  # P2 fix: printf -v is bash-only; gate the whole block behind a
-  # BASH detection so the file still works under mksh/ash. When
-  # bash is present (which is the case on every device we support)
-  # the printf -v path is taken; otherwise we fall back to eval,
-  # which is safe because the allow-list above restricts VARNAME to
-  # three known-safe keys.
+  [ -n "${MAGISKTMP:-}" ] && PROPPATH="$MAGISKTMP/.magisk/config $PROPPATH"
+  VALUE=$(grep_prop "$VARNAME" $PROPPATH)
+
+  # PatchNest is executed by Android /system/bin/sh, not bash. Keep this helper
+  # strictly POSIX and assign only the three reviewed keys explicitly; never
+  # retain an eval fallback in a root shell.
   case "$VARNAME" in
-    KEEPVERITY|KEEPFORCEENCRYPT|RECOVERYMODE) ;;
-    *) abort "! getvar: unknown key '$VARNAME'";;
+    KEEPVERITY) KEEPVERITY=$VALUE ;;
+    KEEPFORCEENCRYPT) KEEPFORCEENCRYPT=$VALUE ;;
+    RECOVERYMODE) RECOVERYMODE=$VALUE ;;
+    *) ui_print "! getvar: unknown key '$VARNAME'"; return 1 ;;
   esac
-  if [ -n "$BASH" ] && [ -n "$VALUE" ]; then
-    printf -v "$VARNAME" '%s' "$VALUE"
-  elif [ -n "$VALUE" ]; then
-    eval "$VARNAME=\$VALUE"
-  fi
 }
 
 is_mounted() {
@@ -81,16 +72,11 @@ is_mounted() {
 
 abort() {
   ui_print "$1"
-  $BOOTMODE || recovery_cleanup
-  # P1 security fix: quote both variables in rm -rf. Unquoted $MODPATH
-  # with a glob character would expand and rm -rf; unquoted $TMPDIR
-  # on an unset value would degrade to `rm -rf` (no arg, but loud).
-  if [ -n "$MODPATH" ]; then
-    rm -rf "$MODPATH"
-  fi
-  if [ -n "$TMPDIR" ]; then
-    rm -rf "$TMPDIR"
-  fi
+  # This copy of util_functions.sh lives inside the installed PatchNest
+  # patch-helper tree. $MODPATH therefore points at persistent recovery code,
+  # not a disposable installer staging directory. Never delete it on failure.
+  # Operation-private workspaces are owned by their callers and cleaned by
+  # traps there.
   exit 1
 }
 set_nvbase() {
@@ -492,7 +478,6 @@ get_flags() {
   if [ -z $KEEPFORCEENCRYPT ]; then
     if $ISENCRYPTED; then
       KEEPFORCEENCRYPT=true
-      ui_print "- Encrypted data, keep forceencrypt"
     else
       KEEPFORCEENCRYPT=false
     fi
