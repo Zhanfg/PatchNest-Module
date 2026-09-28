@@ -1,5 +1,8 @@
 # PatchNest Module
 
+> **Canonical 仓库：**后续开发已迁移到 [`Zhanfg/PatchNest`](https://github.com/Zhanfg/PatchNest) 的 `module/` 目录。本独立仓库暂时保留历史 Release 与尚未完成的真机验证 Draft，不再作为主开发入口。
+
+
 [English](README.md) | **中文**
 
 PatchNest Module 为 Magisk、KernelSU、KernelSU-Next 和 APatch 提供 KPM 宿主、安装管理与 WebUI。项目基于 `KernelSU-Next/KPatch-Next-Module` 继续维护，但使用独立的发布与依赖链。
