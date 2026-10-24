@@ -170,7 +170,8 @@ replace("src/netlink.c", """	if (b->kind > KAUX_KIND_MAX || b->bytes == 0 ||
 	g_staged_kind = b->kind;""")
 replace("src/netlink.c", """	if (g_staged_total == 0 || offset != g_staged_len ||""", """	if (g_staged == NULL || g_staged_total == 0 ||
 	    offset != g_staged_len ||""")
-replace("src/netlink.c", """	/* The blob is moved out of the staging buffer and applied with the lock
+replace("src/netlink.c", """	/*
+	 * The blob is moved out of the staging buffer and applied with the lock
 	 * dropped. Applying it resolves paths and touches inodes, and that can
 	 * sleep: an apply inside this lock blocks the next page of the next upload,
 	 * which is what turned an install into a hang.
