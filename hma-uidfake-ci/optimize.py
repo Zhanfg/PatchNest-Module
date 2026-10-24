@@ -133,7 +133,8 @@ replace("src/policy.c", """		if (app < UF_APP_SPAN)
 # allocation; free it after commit. New upload while apply runs has its own
 # fresh staging buffer and is protected by the existing staging mutex.
 replace("src/netlink.c", "#include <linux/slab.h>", "#include <linux/slab.h>\n#include <linux/vmalloc.h>")
-replace("src/netlink.c", """	/* The staging buffer is allocated on the first upload, not at load: it is
+replace("src/netlink.c", """	/*
+	 * The staging buffer is allocated on the first upload, not at load: it is
 	 * megabytes now, and the module is loaded while /data is barely there.
 	 */
 	if (g_staged == NULL)
