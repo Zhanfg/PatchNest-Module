@@ -70,7 +70,6 @@ jobs:
           path: audit/
 
   ko:
-    needs: host-tests
     runs-on: ubuntu-24.04
     container:
       image: ghcr.io/ylarod/ddk:${{ matrix.kmi }}-20260828
@@ -121,7 +120,7 @@ jobs:
           if-no-files-found: error
 
   pack:
-    needs: ko
+    needs: [host-tests, ko]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
