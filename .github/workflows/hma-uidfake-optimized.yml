@@ -41,6 +41,8 @@ jobs:
           sudo apt-get install -y nlohmann-json3-dev libtinyxml2-dev
           cd upstream
           mkdir -p build
+          # Upstream's C shim uses a C++ nullptr token; fix test-only shim.
+          sed -i 's/\bnullptr\b/NULL/g' scripts/hosttest/linux/sched.h
           bash scripts/run-hosttest.sh
       - name: Validate scripts, WebUI and policy tests
         run: |
