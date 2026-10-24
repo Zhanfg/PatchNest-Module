@@ -43,6 +43,7 @@ jobs:
           mkdir -p build
           # Upstream's C shim uses a C++ nullptr token; fix test-only shim.
           sed -i 's/\bnullptr\b/NULL/g' scripts/hosttest/linux/sched.h
+          sed -i '/^#define pr_warn(\.\.\.)/a #define pr_err(...) ((void)0)' scripts/shadow_host_test.c
           bash scripts/run-hosttest.sh
       - name: Validate scripts, WebUI and policy tests
         run: |
