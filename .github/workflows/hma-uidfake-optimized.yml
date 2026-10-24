@@ -1,0 +1,160 @@
+name: HMA UIDFake KO optimized verification
+on:
+  push:
+    branches:
+      - feature/hma-uidfake-0316-opt
+    paths:
+      - 'hma-uidfake-ci/**'
+      - '.github/workflows/hma-uidfake-optimized.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  BASE_COMMIT: 325c827def461aacb8447a045e4b8052fd51a8cc
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: driver
+      - uses: actions/checkout@v4
+        with:
+          repository: Mobilelegends74/hma-uidfake
+          ref: ${{ env.BASE_COMMIT }}
+          submodules: recursive
+          path: upstream
+      - name: Apply guarded fixes
+        run: |
+          set -euo pipefail
+          cd upstream
+          python3 ../driver/hma-uidfake-ci/optimize.py
+          git diff --check
+          git diff --stat
+      - name: Run upstream host unit and sanitizer tests
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y nlohmann-json3-dev libtinyxml2-dev
+          cd upstream
+          mkdir -p build
+          bash scripts/run-hosttest.sh
+      - name: Validate scripts, WebUI and policy tests
+        run: |
+          set -euo pipefail
+          cd upstream
+          for f in module/*.sh; do sh -n "$f"; done
+          node --check module/webroot/app.js
+          node --check module/webroot/i18n.js
+          node --check module/webroot/help.js
+          node scripts/test-webui-i18n.cjs
+          node scripts/test-webui-help.cjs
+          python3 scripts/test-manual-inject.py
+          python3 scripts/test-module-abi.py
+      - name: Archive changed source
+        if: always()
+        run: |
+          mkdir -p audit
+          (cd upstream && git diff -- src > ../audit/optimized.patch)
+          (cd upstream && git diff --stat > ../audit/changes.txt)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hma-reviewed-source-patch
+          path: audit/
+
+  ko:
+    needs: host-tests
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/ylarod/ddk:${{ matrix.kmi }}-20260828
+      options: --privileged
+    strategy:
+      fail-fast: false
+      matrix:
+        kmi:
+          - android12-5.10
+          - android13-5.10
+          - android13-5.15
+          - android14-5.15
+          - android14-6.1
+          - android15-6.6
+          - android16-6.12
+          - android17-6.18
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: driver
+      - uses: actions/checkout@v4
+        with:
+          repository: Mobilelegends74/hma-uidfake
+          ref: ${{ env.BASE_COMMIT }}
+          path: upstream
+      - name: Apply fixes and compile real ARM64 KMI module
+        run: |
+          set -euo pipefail
+          cd upstream
+          python3 ../driver/hma-uidfake-ci/optimize.py
+          KDIR="/opt/ddk/kdir/${{ matrix.kmi }}"
+          test -f "$KDIR/Makefile"
+          python3 scripts/restore-modpost.py "/opt/ddk/src/${{ matrix.kmi }}"
+          test -s "$KDIR/Module.symvers"
+          make -C "$KDIR" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- modules_prepare
+          stage="$RUNNER_TEMP/hma-stage-${{ matrix.kmi }}"
+          mkdir -p "$stage" "$GITHUB_WORKSPACE/out"
+          for f in src/*; do ln -sfn "$PWD/$f" "$stage/$(basename "$f")"; done
+          make -C "$KDIR" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- M="$stage" modules
+          test -s "$stage/hma_uidfake.ko"
+          llvm-strip -d "$stage/hma_uidfake.ko" || true
+          llvm-readelf -h "$stage/hma_uidfake.ko" | grep -E 'AArch64|REL'
+          cp "$stage/hma_uidfake.ko" "$GITHUB_WORKSPACE/out/${{ matrix.kmi }}_arm64_hma_uidfake.ko"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: optimized-ko-${{ matrix.kmi }}
+          path: out/*.ko
+          if-no-files-found: error
+
+  pack:
+    needs: ko
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: optimized-ko-*
+          merge-multiple: true
+          path: optimized
+      - name: Rebuild complete installable module ZIP from published full module
+        run: |
+          set -euo pipefail
+          curl -fLsS --retry 4 --retry-all-errors -o base.zip 'https://github.com/Mobilelegends74/hma-uidfake/releases/download/v0.3.16/hma-uidfake-fork-0.3.16-test.zip'
+          mkdir -p packed dist
+          (cd packed && unzip -q ../base.zip)
+          test "$(find optimized -maxdepth 1 -name '*.ko' | wc -l)" -eq 8
+          for ko in optimized/*.ko; do
+            test -s "$ko"
+            cp "$ko" "packed/ko/$(basename "$ko")"
+          done
+          # Do not silently delete the vendor-specific 6.12.38 module:
+          test -s packed/ko/android16-6.12-oneplus-6.12.38_arm64_hma_uidfake.ko
+          cat > packed/OPTIMIZATION_STATUS.txt <<'TEXT'
+          Based on 0.3.16 + 325c827. Eight generic KMI modules are rebuilt
+          with the reviewed source fixes. The vendor-specific OnePlus 6.12.38
+          candidate is preserved byte-for-byte from the original release; it is
+          not claimed to be optimized. GitHub-hosted runner tests do NOT prove
+          successful loading on a OnePlus or any Android physical device.
+          TEXT
+          cat >> packed/module.prop <<'TEXT'
+          TEXT
+          (cd packed && zip -qr ../dist/hma-uidfake-fork-0.3.16-opt-ci.zip .)
+          unzip -t dist/hma-uidfake-fork-0.3.16-opt-ci.zip | tail -1
+          test "$(unzip -Z1 dist/hma-uidfake-fork-0.3.16-opt-ci.zip | grep -E '^ko/.*\.ko$' | wc -l)" -eq 9
+          sha256sum dist/*.zip > dist/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hma-uidfake-optimized-module
+          path: dist/
+          if-no-files-found: error
