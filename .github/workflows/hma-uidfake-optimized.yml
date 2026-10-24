@@ -44,6 +44,15 @@ jobs:
           # Upstream's C shim uses a C++ nullptr token; fix test-only shim.
           sed -i 's/\bnullptr\b/NULL/g' scripts/hosttest/linux/sched.h
           sed -i '/^#define pr_warn(\.\.\.)/a #define pr_err(...) ((void)0)' scripts/shadow_host_test.c
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/shadow_host_test.c')
+          s = p.read_text()
+          anchor = 'int main(int argc, char **argv)\\n{\\n'
+          assert s.count(anchor) == 1
+          s = s.replace(anchor, anchor + '    g_kern_path = fake_kern_path;\\n    g_path_put = (void (*)(const struct path *))path_put;\\n')
+          p.write_text(s)
+          PY
           bash scripts/run-hosttest.sh
       - name: Validate scripts, WebUI and policy tests
         run: |
